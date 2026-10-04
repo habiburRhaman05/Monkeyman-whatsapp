@@ -1,0 +1,16 @@
+.env
+data/
+node_modules/
+.next/
+__pycache__/
+*.pyc
+.venv/
+backend/.venv/
+.DS_Store
+Thumbs.db
+*.egg-info/
+dist/
+build/
+
+# real webhook samples captured at runtime (may contain phone numbers)
+docs/payloads/

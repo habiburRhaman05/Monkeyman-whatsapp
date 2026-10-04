@@ -1,0 +1,110 @@
+INFO:     Started server process [14424]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO  app.main  Registering webhook URL with Evolution: http://host.docker.internal:8000/webhook/evolution?secret=***
+INFO  app.main  WEBHOOK_BASE_URL=http://host.docker.internal:8000  (should be http://host.docker.internal:8000 on Docker Desktop)
+INFO  httpx  HTTP Request: POST http://localhost:8080/webhook/set/acc_6b795ae2 "HTTP/1.1 201 Created"
+INFO  app.main  Webhook registered for account 1 (acc_6b795ae2)
+INFO  app.sync  Starting sync for account 1
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findChats/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  app.sync  Sync: fetched 109 chats from Evolution for test
+INFO  app.sync  Sync: importing messages for 30 recent chats
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findMessages/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: POST http://localhost:8080/chat/findContacts/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  app.sync  Sync already running for account 1, skipping
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363031288303115%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363190484736428%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363198519505169%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363215126375849%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363224392191632%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363264780991943%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363295411549510%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363296355196102%40g.us "HTTP/1.1 404 Not Found"
+INFO:     127.0.0.1:64266 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO  app.ws  WS connected (1 total)
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363366909233454%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/instance/connectionState/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363386576005080%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363405735781822%40g.us "HTTP/1.1 404 Not Found"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363406201270539%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363406546914068%40g.us "HTTP/1.1 404 Not Found"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363410569564744%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363412031081257%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363412228221002%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363413109267940%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363413582222359%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363413591993518%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363413694052661%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363425497478028%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363427226796293%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363427702674083%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363428575582661%40g.us "HTTP/1.1 200 OK"
+INFO  app.sync  Sync already running for account 1, skipping
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363428780416396%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363429236014017%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363429446781841%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363429757839720%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363429909361442%40g.us "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/group/findGroupInfos/acc_6b795ae2?groupJid=120363430351803421%40g.us "HTTP/1.1 200 OK"
+INFO  app.sync  Sync: built 1486 @lid→phone mappings from 30 groups
+INFO  app.sync  Sync completed for account 1 (unread_total=0)
+INFO  app.ws  WS disconnected (0 total)
+INFO:     127.0.0.1:58722 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO  app.ws  WS connected (1 total)
+INFO  app.ws  WS disconnected (0 total)
+INFO:     127.0.0.1:58731 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO  app.ws  WS connected (1 total)
+INFO  httpx  HTTP Request: GET http://localhost:8080/instance/connectionState/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/instance/connectionState/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  app.routers.webhook  ⚡ Webhook received: PRESENCE_UPDATE from acc_6b795ae2 (ws clients: 1)
+INFO  app.routers.webhook  ⚡ Webhook received: PRESENCE_UPDATE from acc_6b795ae2 (ws clients: 1)
+INFO  app.routers.webhook  ⚡ Webhook received: PRESENCE_UPDATE from acc_6b795ae2 (ws clients: 1)
+INFO  app.routers.webhook  ⚡ Webhook received: PRESENCE_UPDATE from acc_6b795ae2 (ws clients: 1)
+INFO  app.routers.webhook  ⚡ Webhook received: PRESENCE_UPDATE from acc_6b795ae2 (ws clients: 1)
+INFO  app.routers.webhook  ⚡ Webhook received: PRESENCE_UPDATE from acc_6b795ae2 (ws clients: 1)
+INFO  app.routers.webhook  ⚡ Webhook received: MESSAGES_UPSERT from acc_6b795ae2 (ws clients: 1)
+INFO  app.routers.webhook  MESSAGES_UPSERT: 1 item(s) for account test
+INFO  app.routers.webhook  New message stored: chat=16 type=text from_me=False
+INFO  app.ws  WS disconnected (0 total)
+INFO:     127.0.0.1:50946 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO  app.ws  WS connected (1 total)
+INFO  app.ws  WS disconnected (0 total)
+INFO:     127.0.0.1:55266 - "WebSocket /ws" [accepted]
+INFO:     connection open
+INFO  app.ws  WS connected (1 total)
+INFO  httpx  HTTP Request: GET http://localhost:8080/instance/connectionState/acc_6b795ae2 "HTTP/1.1 200 OK"
+INFO  httpx  HTTP Request: GET http://localhost:8080/instance/connectionState/acc_6b795ae2 "HTTP/1.1 200 OK"
