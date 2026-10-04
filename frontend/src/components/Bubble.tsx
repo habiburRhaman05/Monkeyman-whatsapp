@@ -101,6 +101,18 @@ function seededBars(seed: string, count: number): number[] {
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
+function AvatarWithFallback({ src, name, initial, size }: { src?: string | null; name: string; initial: string; size: number }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return <img src={src} alt={name} className="rounded-full object-cover" style={{ width: size, height: size }} onError={() => setFailed(true)} />;
+  }
+  return (
+    <span className="rounded-full flex items-center justify-center text-white text-sm font-semibold" style={{ width: size, height: size, background: avatarColor(name) }}>
+      {initial}
+    </span>
+  );
+}
+
 /** WhatsApp-style voice note: play button, scrubbable waveform, time, sender avatar with a mic badge. */
 function VoiceNote({ url, mine, label, picUrl }: { url: string; mine: boolean; label: string; picUrl?: string | null }) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -166,7 +178,7 @@ function VoiceNote({ url, mine, label, picUrl }: { url: string; mine: boolean; l
       <button
         onClick={toggle}
         title={playing ? "Pause" : "Play"}
-        className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-transparent text-[#54656f] hover:text-[#3b4a54]"
+        className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-transparent hover:opacity-80 ${mine ? "text-[#3b7a57]" : "text-[#54656f]"}`}
       >
         {playing ? (
           <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
@@ -191,17 +203,17 @@ function VoiceNote({ url, mine, label, picUrl }: { url: string; mine: boolean; l
                 height: `${Math.max(h * 100, 12)}%`,
                 background: i <= playedIdx
                   ? "#00a884"
-                  : mine ? "rgba(255,255,255,0.45)" : "#b8c1c8",
+                  : mine ? "#a8d4a0" : "#b8c1c8",
               }}
             />
           ))}
         </div>
         <div className="flex items-center justify-between mt-1">
-          <span className={`text-[11px] ${mine ? "text-white/70" : "text-muted"}`}>
+          <span className="text-[11px] text-muted">
             {mmss(playing || current > 0 ? current : duration)}
           </span>
           {playing && (
-            <button onClick={cycleSpeed} className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${mine ? "text-white/80 bg-white/15" : "text-muted bg-black/5"}`}>
+            <button onClick={cycleSpeed} className="text-[10px] font-bold px-1.5 py-0.5 rounded text-muted bg-black/5">
               {speed}x
             </button>
           )}
@@ -209,15 +221,7 @@ function VoiceNote({ url, mine, label, picUrl }: { url: string; mine: boolean; l
       </div>
       {/* Avatar with mic badge */}
       <div className="relative shrink-0">
-        {picUrl ? (
-          <img src={picUrl} alt={label} className="w-11 h-11 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; (e.target as HTMLImageElement).nextElementSibling as HTMLElement && ((e.target as HTMLImageElement).parentElement!.querySelector(".av-fallback") as HTMLElement)?.classList.remove("hidden"); }} />
-        ) : null}
-        <span
-          className={`${picUrl ? "av-fallback hidden" : ""} w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-semibold`}
-          style={{ background: avatarColor(label) }}
-        >
-          {initial}
-        </span>
+        <AvatarWithFallback src={picUrl} name={label} initial={initial} size={44} />
         <span className="absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-[#00a884] border-2 border-white flex items-center justify-center">
           <svg viewBox="0 0 24 24" width="9" height="9" fill="white">
             <rect x="9" y="2" width="6" height="11" rx="3" />
@@ -400,7 +404,7 @@ function QuotedMessage({ msg, mine }: { msg: Message; mine: boolean }) {
   );
 }
 
-function ContextMenu({ msg, accountId, onClose }: { msg: Message; accountId: number; onClose: () => void }) {
+function ContextMenu({ msg, accountId, onClose, portal }: { msg: Message; accountId: number; onClose: () => void; portal?: boolean }) {
   const chats = useStore((s) => (s.activeAccountId ? s.chats[s.activeAccountId] : []));
   const [showForward, setShowForward] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
@@ -412,7 +416,7 @@ function ContextMenu({ msg, accountId, onClose }: { msg: Message; accountId: num
 
   if (showDelete) {
     return (
-      <div className="absolute z-50 bg-white rounded-lg shadow-lg border border-border py-1 w-44" style={{ bottom: "100%", right: 0 }}>
+      <div className={`${portal ? "" : "absolute"} z-50 bg-white rounded-lg shadow-lg border border-border py-1 w-44`} style={portal ? {} : { bottom: "100%", right: 0 }}>
         <div className="text-xs font-medium text-muted px-3 py-1">Delete message?</div>
         {msg.from_me && sent && (
           <button
@@ -435,7 +439,7 @@ function ContextMenu({ msg, accountId, onClose }: { msg: Message; accountId: num
 
   if (showForward) {
     return (
-      <div className="absolute z-50 bg-white rounded-lg shadow-lg border border-border p-2 w-52 max-h-48 overflow-y-auto" style={{ bottom: "100%", right: 0 }}>
+      <div className={`${portal ? "" : "absolute"} z-50 bg-white rounded-lg shadow-lg border border-border p-2 w-52 max-h-48 overflow-y-auto`} style={portal ? {} : { bottom: "100%", right: 0 }}>
         <div className="text-xs font-medium text-muted mb-1 px-1">Forward to:</div>
         {(chats || []).map((c) => (
           <button
@@ -454,7 +458,7 @@ function ContextMenu({ msg, accountId, onClose }: { msg: Message; accountId: num
   }
 
   return (
-    <div className="absolute z-50 bg-white rounded-lg shadow-lg border border-border py-1 w-36" style={{ bottom: "100%", right: 0 }}>
+    <div className={`${portal ? "" : "absolute"} z-50 bg-white rounded-lg shadow-lg border border-border py-1 w-36`} style={portal ? {} : { bottom: "100%", right: 0 }}>
       <button
         onClick={() => {
           useStore.getState().setReplyTo({
@@ -534,6 +538,17 @@ function ContextMenu({ msg, accountId, onClose }: { msg: Message; accountId: num
 export default function Bubble({ msg, isGroup, showName, accountId }: { msg: Message; isGroup: boolean; showName: boolean; accountId: number }) {
   const mine = msg.from_me;
   const [showMenu, setShowMenu] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [showMenu]);
 
   if (msg.deleted) {
     return (
@@ -549,6 +564,14 @@ export default function Bubble({ msg, isGroup, showName, accountId }: { msg: Mes
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"} px-3 group relative`}>
       <div
+        onContextMenu={(e) => {
+          if (msg.id > 0 && !msg.wa_message_id.startsWith("pending-")) {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuPos({ x: e.clientX, y: e.clientY });
+            setShowMenu(true);
+          }
+        }}
         className={`max-w-[82%] md:max-w-[65%] rounded-lg px-2.5 py-1.5 shadow-sm relative ${
           mine ? "bg-bubble-mine rounded-tr-none" : "bg-bubble-theirs rounded-tl-none"
         }`}
@@ -606,7 +629,7 @@ export default function Bubble({ msg, isGroup, showName, accountId }: { msg: Mes
         {/* Context menu trigger */}
         {msg.id > 0 && !msg.wa_message_id.startsWith("pending-") && (
           <button
-            onClick={() => setShowMenu(!showMenu)}
+            onClick={() => { setMenuPos(null); setShowMenu(!showMenu); }}
             className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-black/5 transition-opacity"
           >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" className="text-muted">
@@ -614,7 +637,13 @@ export default function Bubble({ msg, isGroup, showName, accountId }: { msg: Mes
             </svg>
           </button>
         )}
-        {showMenu && <ContextMenu msg={msg} accountId={accountId} onClose={() => setShowMenu(false)} />}
+        {showMenu && menuPos && createPortal(
+          <div ref={menuRef} className="fixed z-[999]" style={{ top: menuPos.y, left: menuPos.x }}>
+            <ContextMenu msg={msg} accountId={accountId} onClose={() => setShowMenu(false)} portal />
+          </div>,
+          document.body,
+        )}
+        {showMenu && !menuPos && <div ref={menuRef}><ContextMenu msg={msg} accountId={accountId} onClose={() => setShowMenu(false)} /></div>}
       </div>
     </div>
   );

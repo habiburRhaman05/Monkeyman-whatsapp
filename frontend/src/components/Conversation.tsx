@@ -37,6 +37,7 @@ export default function Conversation() {
   const [showProfile, setShowProfile] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Message[] | null>(null);
   const [highlightId, setHighlightId] = useState<number | null>(null);
@@ -46,6 +47,7 @@ export default function Conversation() {
     setShowProfile(false);
     setShowSearch(false);
     setShowMenu(false);
+    setCtx(null);
     setSearchQuery("");
     setSearchResults(null);
     setHighlightId(null);
@@ -121,7 +123,53 @@ export default function Conversation() {
 
   return (
     <div className="flex-1 flex min-w-0 min-h-0 relative">
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#efeae2]">
+      <div
+        className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#efeae2]"
+        onContextMenu={(e) => {
+          const t = e.target as HTMLElement;
+          if (t.closest("input, textarea")) return; // keep native menu for paste/spell-check in the composer
+          e.preventDefault();
+          setCtx({
+            x: Math.min(e.clientX, window.innerWidth - 210),
+            y: Math.min(e.clientY, window.innerHeight - 260),
+          });
+        }}
+      >
+        {ctx && chat && (
+          <>
+            <div
+              className="fixed inset-0 z-[998]"
+              onClick={() => setCtx(null)}
+              onContextMenu={(e) => { e.preventDefault(); setCtx(null); }}
+            />
+            <div className="fixed z-[999] w-52 bg-white rounded-lg shadow-lg border border-border py-1" style={{ top: ctx.y, left: ctx.x }}>
+              {[
+                { label: chat.is_group ? "Group info" : "View contact", run: () => setShowProfile(true) },
+                { label: "Search in chat", run: () => { setShowSearch(true); setSearchResults(null); setSearchQuery(""); } },
+                { label: chat.muted ? "Unmute notifications" : "Mute notifications", run: () => setChatFlags(chat, { muted: !chat.muted }) },
+                { label: chat.archived ? "Unarchive chat" : "Archive chat", run: () => { setChatFlags(chat, { archived: !chat.archived }); closeChat(); } },
+                {
+                  label: "Clear chat",
+                  run: () => {
+                    if (window.confirm("Clear this chat? Messages stay on WhatsApp — this only clears them from this dashboard.")) clearChat(accountId, chatId);
+                  },
+                },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => { setCtx(null); item.run(); }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                >
+                  {item.label}
+                </button>
+              ))}
+              <div className="my-1 border-t border-border" />
+              <button onClick={() => { setCtx(null); closeChat(); }} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50">
+                Close chat
+              </button>
+            </div>
+          </>
+        )}
         {/* Header */}
         <div className="flex items-center gap-3 px-3 py-2 bg-sidebar-bg border-b border-border shrink-0">
           <button onClick={closeChat} className="md:hidden p-2 -ml-1 rounded-full hover:bg-background" aria-label="Back">
