@@ -179,6 +179,7 @@ class Campaign(Base):
     trigger_label_id: Mapped[int | None] = mapped_column(ForeignKey("labels.id"), nullable=True)
     sender_account_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of account IDs
     nodes: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of node dicts
+    settings: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON sending limits
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

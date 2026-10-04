@@ -17,7 +17,7 @@ import {
 import { chatTitle, playChime, resolveChatName } from "@/lib/util";
 import type { Account, Chat, Message } from "@/lib/api";
 
-const BASE_TITLE = "WhatsApp Dashboard";
+const BASE_TITLE = "MonkeyMan - Campaigns";
 
 /** Mounted once in the root layout: owns the WebSocket, notifications and the tab title. */
 export default function Realtime() {
@@ -157,7 +157,7 @@ export default function Realtime() {
         const s = useStore.getState();
         const id: number = msg.account_id;
         if (msg.data?.error) {
-          s.pushToast({ kind: "error", title: "Sync failed", body: "Check that Evolution API is running." });
+          s.pushToast({ kind: "error", title: "Sync failed", body: "Please try again in a moment." });
           return;
         }
         if (typeof msg.data?.unread_total === "number") s.patchAccount(id, { unread_total: msg.data.unread_total });

@@ -236,7 +236,7 @@ async def message_media(account_id: int, message_id: int, db: Session = Depends(
     except evolution.EvolutionError as exc:
         raise HTTPException(502, f"Media not available: {exc.detail[:200]}")
     except httpx.HTTPError:
-        raise HTTPException(502, "Cannot reach Evolution API")
+        raise HTTPException(502, "WhatsApp service is unavailable")
     b64 = data.get("base64") if isinstance(data, dict) else None
     if not b64:
         raise HTTPException(502, "Media not available")
@@ -591,7 +591,7 @@ async def react_to_message(account_id: int, message_id: int, body: SendReaction,
     except evolution.EvolutionError as exc:
         raise HTTPException(502, f"Reaction failed (HTTP {exc.status_code}): {exc.detail[:200]}")
     except httpx.HTTPError:
-        raise HTTPException(502, "Cannot reach Evolution API")
+        raise HTTPException(502, "WhatsApp service is unavailable")
     set_reaction(msg, "me", body.emoji)
     db.commit()
     out = message_out(msg)
@@ -633,7 +633,7 @@ async def edit_message(account_id: int, message_id: int, body: EditBody, db: Ses
     except evolution.EvolutionError as exc:
         raise HTTPException(502, f"Edit failed (HTTP {exc.status_code}): {exc.detail[:200]}")
     except httpx.HTTPError:
-        raise HTTPException(502, "Cannot reach Evolution API")
+        raise HTTPException(502, "WhatsApp service is unavailable")
     result = apply_edit(db, acc.id, msg.wa_message_id, text)
     if result:
         msg, chat = result
@@ -723,7 +723,7 @@ async def group_info(account_id: int, chat_id: int, db: Session = Depends(get_db
     except evolution.EvolutionError as exc:
         raise HTTPException(502, f"Group info not available (HTTP {exc.status_code})")
     except httpx.HTTPError:
-        raise HTTPException(502, "Cannot reach Evolution API")
+        raise HTTPException(502, "WhatsApp service is unavailable")
 
     names: dict[str, str] = {}
     for c in db.query(Contact).filter(Contact.account_id == acc.id, Contact.name.is_not(None)).all():
@@ -773,7 +773,7 @@ async def leave_group_chat(account_id: int, chat_id: int, db: Session = Depends(
     except evolution.EvolutionError as exc:
         raise HTTPException(502, f"Could not leave the group (HTTP {exc.status_code}): {exc.detail[:200]}")
     except httpx.HTTPError:
-        raise HTTPException(502, "Cannot reach Evolution API")
+        raise HTTPException(502, "WhatsApp service is unavailable")
     return {"ok": True}
 
 
@@ -923,7 +923,7 @@ async def delete_message(account_id: int, message_id: int, body: DeleteBody, db:
     except evolution.EvolutionError as exc:
         raise HTTPException(502, f"Delete failed (HTTP {exc.status_code}): {exc.detail[:200]}")
     except httpx.HTTPError:
-        raise HTTPException(502, "Cannot reach Evolution API")
+        raise HTTPException(502, "WhatsApp service is unavailable")
     result = apply_revoke(db, acc.id, msg.wa_message_id)
     if result:
         msg, chat = result

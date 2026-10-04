@@ -286,7 +286,7 @@ async def check_whatsapp(body: WaCheckBody, db: Session = Depends(get_db)):
     try:
         results = await evolution.check_is_on_whatsapp(acc.instance_name, phone_list)
     except evolution.EvolutionError as exc:
-        raise HTTPException(502, f"Evolution API error: {exc.detail}")
+        raise HTTPException(502, f"WhatsApp service error: {exc.detail}")
 
     now = datetime.now(timezone.utc)
     yes_count = 0

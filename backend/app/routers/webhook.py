@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from app import evolution
+from app import campaign_settings, evolution
 from app.config import settings
 from app.db import SessionLocal
 from app.models import Account, Campaign, CampaignEvent, CampaignRun, Message
@@ -285,6 +285,8 @@ def _check_campaign_reply(db, account_id: int, sender_jid: str) -> None:
     for run in runs:
         camp = db.get(Campaign, run.campaign_id)
         if not camp or camp.status != "active":
+            continue
+        if not campaign_settings.normalize(camp.settings)["stop_on_reply"]:
             continue
         run.status = "replied"
         run.next_run_at = None

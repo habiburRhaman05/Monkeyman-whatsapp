@@ -161,17 +161,11 @@ export default function AccountsPage() {
     <div className="flex-1 flex flex-col">
       {/* Header */}
       <header className="bg-header-bg text-header-text px-4 py-3 flex items-center justify-between">
-        <h1 className="text-lg font-semibold">WhatsApp Dashboard</h1>
+        <h1 className="text-lg font-semibold">MonkeyMan - Campaigns</h1>
         <Link href="/" className="text-sm px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25">
           ← Back to chats
         </Link>
       </header>
-
-      {/* Risk banner */}
-      <div className="bg-warning/10 border-b border-warning/30 px-4 py-2 text-sm text-yellow-800">
-        ⚠️ Evolution API is unofficial (WhatsApp Web style). Numbers can be
-        banned. Use a spare number first. No bulk sending.
-      </div>
 
       <div className="flex-1 p-4 max-w-2xl mx-auto w-full">
         {error && !showAdd && (

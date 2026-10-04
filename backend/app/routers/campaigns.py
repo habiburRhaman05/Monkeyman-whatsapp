@@ -2,12 +2,15 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app import campaign_settings
 from app.db import get_db
 from app.models import Account, Campaign, CampaignEvent, CampaignNodeState, CampaignRun, Label, UploadedContact
 
@@ -89,6 +92,7 @@ def campaign_out(c: Campaign, db: Session | None = None) -> dict:
         "trigger_label_id": c.trigger_label_id,
         "sender_account_ids": sender_ids,
         "nodes": nodes,
+        "settings": campaign_settings.normalize(c.settings),
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
@@ -110,6 +114,18 @@ class CampaignBody(BaseModel):
     trigger_label_id: int | None = None
     sender_account_ids: list[int] = []
     nodes: list[dict] = []
+    settings: dict | None = None
+
+
+@router.get("/sender-usage")
+def sender_usage(tz: str = "UTC", db: Session = Depends(get_db)):
+    """Messages each number has sent today (across all campaigns), in the given timezone."""
+    st = campaign_settings.normalize({"timezone": tz})
+    since = campaign_settings.day_start_utc(st, datetime.now(timezone.utc).replace(tzinfo=None))
+    rows = db.query(CampaignEvent.account_id, func.count(CampaignEvent.id)).filter(
+        CampaignEvent.kind == "sent", CampaignEvent.at >= since
+    ).group_by(CampaignEvent.account_id).all()
+    return {"usage": {str(a): n for a, n in rows}}
 
 
 @router.get("")
@@ -134,6 +150,7 @@ def create_campaign(body: CampaignBody, db: Session = Depends(get_db)):
         trigger_label_id=body.trigger_label_id,
         sender_account_ids=json.dumps(body.sender_account_ids),
         nodes=json.dumps(body.nodes),
+        settings=json.dumps(campaign_settings.normalize(body.settings)),
     )
     db.add(c)
     db.commit()
@@ -165,6 +182,7 @@ def update_campaign(campaign_id: int, body: CampaignBody, db: Session = Depends(
     c.trigger_label_id = body.trigger_label_id
     c.sender_account_ids = json.dumps(body.sender_account_ids)
     c.nodes = json.dumps(body.nodes)
+    c.settings = json.dumps(campaign_settings.normalize(body.settings))
     db.commit()
     return campaign_out(c, db)
 

@@ -57,6 +57,8 @@ services:
       - CACHE_LOCAL_ENABLED=false
       - DEL_INSTANCE=false
       - QRCODE_LIMIT=30
+      - CONFIG_SESSION_PHONE_CLIENT=Windows
+      - CONFIG_SESSION_PHONE_NAME=Chrome
       - LOG_LEVEL=ERROR,WARN
     volumes:
       - evolution_instances:/evolution/instances

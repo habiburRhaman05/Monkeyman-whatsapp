@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WhatsApp Dashboard",
-  description: "Multi-number WhatsApp dashboard",
+  title: "MonkeyMan - Campaigns",
+  icons: { icon: [] },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

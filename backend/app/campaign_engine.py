@@ -12,7 +12,7 @@ import logging
 import random
 from datetime import datetime, timedelta, timezone
 
-from app import evolution
+from app import campaign_settings, evolution
 from app.contact_import import render_template
 from app.db import SessionLocal
 from app.models import (
@@ -141,6 +141,20 @@ async def _process_run(run: CampaignRun, campaign: Campaign, db) -> None:
             run.node_id = node["id"]
             return
 
+        cfg = campaign_settings.normalize(campaign.settings)
+        now = _utcnow()
+        if not campaign_settings.in_send_window(cfg, now):
+            run.next_run_at = campaign_settings.next_window_start(cfg, now)
+            return
+        sent_today = db.query(CampaignEvent).filter(
+            CampaignEvent.account_id == acc.id,
+            CampaignEvent.kind == "sent",
+            CampaignEvent.at >= campaign_settings.day_start_utc(cfg, now),
+        ).count()
+        if sent_today >= min(cfg["daily_limit"], MAX_MSG_PER_DAY):
+            run.next_run_at = now + timedelta(minutes=30)
+            return
+
         # Round-robin variant selection per node per account
         state = db.query(CampaignNodeState).filter_by(
             campaign_id=campaign.id, node_id=node["id"], account_id=acc.id
@@ -158,8 +172,8 @@ async def _process_run(run: CampaignRun, campaign: Campaign, db) -> None:
         contact = _get_contact_dict(run, db)
         text = render_template(template, contact)
 
-        # Random delay (10-30s) to appear human
-        await asyncio.sleep(random.uniform(10, 30))
+        # Random delay within the campaign's configured range
+        await asyncio.sleep(random.uniform(cfg["delay_min"], cfg["delay_max"]))
 
         ok = await _send_message(acc.instance_name, run.phone, text, run, node, vi, db)
         state.variant_counter += 1
@@ -178,7 +192,7 @@ async def _process_run(run: CampaignRun, campaign: Campaign, db) -> None:
                 run.node_id = nxt["id"]
                 run.status = "waiting"
             else:
-                run.next_run_at = _utcnow() + timedelta(seconds=random.randint(10, 30))
+                run.next_run_at = _utcnow() + timedelta(seconds=random.randint(cfg["delay_min"], cfg["delay_max"]))
         else:
             run.status = "failed"
             run.next_run_at = None

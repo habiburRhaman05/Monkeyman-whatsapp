@@ -9,6 +9,11 @@ import VariablePills from "@/components/VariablePills";
 function genId() {
   return Math.random().toString(36).slice(2, 8);
 }
+const DEFAULT_SETTINGS: api.CampaignSettings = {
+  daily_limit: 50, delay_min: 10, delay_max: 30, start_hour: 9, end_hour: 17,
+  weekdays_only: true, stop_on_reply: true, timezone: "UTC",
+};
+const MAX_PER_DAY = 200;
 const newMsg = (): api.CampaignNode => ({ id: genId(), type: "message", variants: [""] });
 const newWait = (): api.CampaignNode => ({ id: genId(), type: "wait", amount: 1, unit: "hours", check_reply: false });
 const newDrip = (): api.CampaignNode => ({ id: genId(), type: "drip", batch_size: 50, amount: 1, unit: "hours" });
@@ -111,6 +116,9 @@ export default function CampaignsPage() {
   const [triggerType, setTriggerType] = useState<"manual" | "tag_added">("manual");
   const [triggerLabelId, setTriggerLabelId] = useState<number | null>(null);
   const [senderIds, setSenderIds] = useState<number[]>([]);
+  const browserTz = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+  const [settings, setSettings] = useState<api.CampaignSettings>({ ...DEFAULT_SETTINGS, timezone: browserTz });
+  const [usage, setUsage] = useState<Record<string, number>>({});
   const [nodes, setNodes] = useState<api.CampaignNode[]>([newMsg()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -163,6 +171,12 @@ export default function CampaignsPage() {
       .catch(() => {});
   }, [load, labels.length]);
 
+  useEffect(() => {
+    if (!editorOpen) return;
+    api.getSenderUsage(browserTz).then((r) => setUsage(r.usage)).catch(() => {});
+    api.listBatches().then(setBatches).catch(() => {});
+  }, [editorOpen, browserTz]);
+
   async function loadBatches() {
     try { setBatches(await api.listBatches()); } catch {}
   }
@@ -200,7 +214,7 @@ export default function CampaignsPage() {
 
   function resetEditor() {
     setName("New Campaign"); setTriggerType("manual"); setTriggerLabelId(null);
-    setSenderIds([]); setNodes([newMsg()]); setError(""); setSelectedNode(null);
+    setSenderIds([]); setSettings({ ...DEFAULT_SETTINGS, timezone: browserTz }); setNodes([newMsg()]); setError(""); setSelectedNode(null);
     setEditorTab("builder"); setEnrollResult(null); setRuns([]); setExpandedRun(null);
   }
   function openNew() { resetEditor(); setEditId(null); setCreating(true); }
@@ -210,6 +224,7 @@ export default function CampaignsPage() {
       const c = await api.getCampaign(id);
       setEditId(c.id); setName(c.name); setTriggerType(c.trigger_type);
       setTriggerLabelId(c.trigger_label_id); setSenderIds(c.sender_account_ids);
+      setSettings({ ...c.settings, timezone: browserTz });
       setNodes(c.nodes.length > 0 ? c.nodes : [newMsg()]);
     } catch { setError("Failed to load campaign"); }
   }
@@ -262,7 +277,7 @@ export default function CampaignsPage() {
   async function handleSave() {
     setError(""); setSaving(true);
     try {
-      const body: api.CampaignBody = { name: name.trim(), trigger_type: triggerType, trigger_label_id: triggerType === "tag_added" ? triggerLabelId : null, sender_account_ids: senderIds, nodes };
+      const body: api.CampaignBody = { name: name.trim(), trigger_type: triggerType, trigger_label_id: triggerType === "tag_added" ? triggerLabelId : null, sender_account_ids: senderIds, nodes, settings };
       if (editId) await api.updateCampaign(editId, body); else await api.createCampaign(body);
       closeEditor(); load();
     } catch (e) { setError(e instanceof api.ApiError ? e.detail : "Save failed"); }
@@ -417,7 +432,7 @@ export default function CampaignsPage() {
                   className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.03)_1px,transparent_1px)] bg-[length:20px_20px]">
                   <div data-canvas-bg className="max-w-lg mx-auto py-8 px-4">
                     {/* ── Settings cards ─────────────────── */}
-                    <div className="grid grid-cols-2 gap-3 mb-6">
+                    <div className="mb-6">
                       {/* Trigger */}
                       <div className="bg-white rounded-xl border border-border p-3 shadow-sm">
                         <label className="text-[10px] text-muted uppercase tracking-wider font-semibold">Trigger</label>
@@ -436,21 +451,6 @@ export default function CampaignsPage() {
                             {labels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                           </select>
                         )}
-                      </div>
-                      {/* Senders */}
-                      <div className="bg-white rounded-xl border border-border p-3 shadow-sm">
-                        <label className="text-[10px] text-muted uppercase tracking-wider font-semibold">Sender Numbers</label>
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          {accounts.filter((a) => a.status === "connected").map((a) => (
-                            <button key={a.id} onClick={() => setSenderIds((p) => p.includes(a.id) ? p.filter((x) => x !== a.id) : [...p, a.id])}
-                              className={`px-2 py-1 text-[11px] rounded-lg border transition-colors ${senderIds.includes(a.id) ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border text-muted hover:bg-gray-50"}`}>
-                              {a.label}{a.phone_number ? ` (+${a.phone_number})` : ""}
-                            </button>
-                          ))}
-                          {accounts.filter((a) => a.status === "connected").length === 0 && (
-                            <span className="text-[11px] text-muted py-1">No connected numbers</span>
-                          )}
-                        </div>
                       </div>
                     </div>
 
@@ -564,10 +564,67 @@ export default function CampaignsPage() {
                       </div>
                     )}
 
-                    {/* Safety note */}
-                    <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800">
-                      <strong>Safety limits:</strong> Max 200 msg/day per sender. Random 10-30s delay. No auto-retry on failure.
-                    </div>
+                    {/* Sending limits */}
+                    {(() => {
+                      const upd = (patch: Partial<api.CampaignSettings>) => setSettings((p) => ({ ...p, ...patch }));
+                      const num = (v: string) => (v === "" ? 0 : Number(v.replace(/[^\d]/g, "")));
+                      const connectedSel = accounts.filter((a) => senderIds.includes(a.id) && a.status === "connected");
+                      const perDay = connectedSel.length * settings.daily_limit;
+                      const msgNodes = nodes.filter((n) => n.type === "message").length;
+                      const contactCount = triggerType === "tag_added" && triggerLabelId
+                        ? batches.filter((b) => b.label_id === triggerLabelId).reduce((t, b) => t + (b.counts?.total ?? b.total), 0)
+                        : (campaigns.find((c) => c.id === editId)?.counts?.total ?? 0);
+                      const totalMsgs = contactCount * msgNodes;
+                      const days = perDay > 0 ? Math.max(1, Math.ceil(totalMsgs / perDay)) : 0;
+                      const skipped = senderIds.filter((id) => accounts.find((a) => a.id === id)?.status !== "connected").length;
+                      const inputCls = "w-16 px-2 py-1.5 text-sm text-center border border-border rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30";
+                      return (
+                        <div className="mt-6 bg-white rounded-xl border border-border p-4 shadow-sm text-sm">
+                          <h3 className="font-semibold">Which numbers send it</h3>
+                          <p className="text-xs text-muted mt-1">A follow-up always goes from the number that sent the first message, so a thread never changes hands halfway through.</p>
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            {accounts.map((a) => {
+                              const on = senderIds.includes(a.id);
+                              const connected = a.status === "connected";
+                              return (
+                                <label key={a.id} className={`flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer text-xs transition-colors ${on ? "border-primary bg-primary/10" : "border-border hover:bg-gray-50"}`}>
+                                  <input type="checkbox" checked={on} onChange={() => setSenderIds((p) => on ? p.filter((x) => x !== a.id) : [...p, a.id])} />
+                                  <span className="font-medium">{a.label}</span>
+                                  <span className="text-muted">{connected ? `${usage[String(a.id)] ?? 0} sent today` : "not connected"}</span>
+                                </label>
+                              );
+                            })}
+                            {accounts.length === 0 && <span className="text-xs text-muted">No numbers added yet</span>}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-4">
+                            <span>Each number sends at most</span>
+                            <input className={inputCls} inputMode="numeric" value={settings.daily_limit} onChange={(e) => upd({ daily_limit: Math.min(MAX_PER_DAY, num(e.target.value)) })} onBlur={() => upd({ daily_limit: Math.max(1, settings.daily_limit) })} />
+                            <span>messages a day, spaced</span>
+                            <input className={inputCls} inputMode="numeric" value={settings.delay_min} onChange={(e) => upd({ delay_min: Math.min(300, num(e.target.value)) })} onBlur={() => { const mn = Math.max(10, settings.delay_min); upd({ delay_min: mn, delay_max: Math.max(mn, settings.delay_max) }); }} />
+                            <span>to</span>
+                            <input className={inputCls} inputMode="numeric" value={settings.delay_max} onChange={(e) => upd({ delay_max: Math.min(300, num(e.target.value)) })} onBlur={() => upd({ delay_max: Math.max(settings.delay_min, settings.delay_max) })} />
+                            <span>seconds apart</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-3">
+                            <span>Only between</span>
+                            <input className={inputCls} inputMode="numeric" value={settings.start_hour} onChange={(e) => upd({ start_hour: Math.min(23, num(e.target.value)) })} />
+                            <span>and</span>
+                            <input className={inputCls} inputMode="numeric" value={settings.end_hour} onChange={(e) => upd({ end_hour: Math.min(24, num(e.target.value)) })} onBlur={() => { if (settings.end_hour <= settings.start_hour) upd({ end_hour: Math.min(24, settings.start_hour + 1) }); }} />
+                            <span>o&apos;clock</span>
+                            <label className="flex items-center gap-1.5 ml-2"><input type="checkbox" checked={settings.weekdays_only} onChange={(e) => upd({ weekdays_only: e.target.checked })} /> weekdays only</label>
+                            <label className="flex items-center gap-1.5 ml-2"><input type="checkbox" checked={settings.stop_on_reply} onChange={(e) => upd({ stop_on_reply: e.target.checked })} /> stop the whole sequence when they reply</label>
+                          </div>
+                          <p className="text-[11px] text-muted mt-2">Times use your timezone ({browserTz}). Hard cap: {MAX_PER_DAY} messages/day per number, minimum 10s delay, no auto-retry on failure.</p>
+                          <div className="flex flex-wrap items-end gap-x-8 gap-y-2 mt-4 pt-4 border-t border-border">
+                            <div><div className="text-2xl font-bold">{perDay}</div><div className="text-xs text-muted">messages a day<br />{connectedSel.length} × {settings.daily_limit}</div></div>
+                            <div><div className="text-2xl font-bold">{contactCount}</div><div className="text-xs text-muted">contacts{triggerType === "tag_added" ? " with that tag" : " enrolled"}</div></div>
+                            <div><div className="text-2xl font-bold">{totalMsgs}</div><div className="text-xs text-muted">messages in total</div></div>
+                            <div><div className="text-2xl font-bold">{days}</div><div className="text-xs text-muted">days to get through it</div></div>
+                            {skipped > 0 && <p className="text-xs text-amber-700 self-center">{skipped} of the chosen numbers {skipped === 1 ? "is" : "are"} not connected — they will be skipped.</p>}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>}
 

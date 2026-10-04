@@ -21,7 +21,7 @@ async function request<T = unknown>(path: string, opts: RequestInit = {}): Promi
       ...opts,
     });
   } catch {
-    throw new ApiError(0, "Cannot reach the backend. Is it running on port 8000?");
+    throw new ApiError(0, "Cannot reach the server. Please try again.");
   }
   if (!res.ok) {
     let detail = res.statusText;
@@ -405,6 +405,17 @@ export interface CampaignNode {
   check_reply?: boolean;
 }
 
+export interface CampaignSettings {
+  daily_limit: number;
+  delay_min: number;
+  delay_max: number;
+  start_hour: number;
+  end_hour: number;
+  weekdays_only: boolean;
+  stop_on_reply: boolean;
+  timezone: string;
+}
+
 export interface CampaignCounts {
   total: number;
   active: number;
@@ -421,6 +432,7 @@ export interface Campaign {
   trigger_label_id: number | null;
   sender_account_ids: number[];
   nodes: CampaignNode[];
+  settings: CampaignSettings;
   created_at: string | null;
   updated_at: string | null;
   counts?: CampaignCounts;
@@ -458,8 +470,11 @@ export interface CampaignBody {
   trigger_label_id?: number | null;
   sender_account_ids?: number[];
   nodes?: CampaignNode[];
+  settings?: CampaignSettings;
 }
 
+export const getSenderUsage = (tz: string) =>
+  request<{ usage: Record<string, number> }>(`/campaigns/sender-usage?tz=${encodeURIComponent(tz)}`);
 export const listCampaigns = () => request<Campaign[]>("/campaigns");
 export const getCampaign = (id: number) => request<Campaign>(`/campaigns/${id}`);
 export const createCampaign = (body: CampaignBody) => post<Campaign>("/campaigns", body);

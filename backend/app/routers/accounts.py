@@ -64,9 +64,9 @@ async def create_account(body: AccountCreate, db: Session = Depends(get_db)):
             webhook_events=WEBHOOK_EVENTS,
         )
     except evolution.EvolutionError as exc:
-        raise HTTPException(status_code=502, detail=f"Evolution API error: {exc.detail}")
+        raise HTTPException(status_code=502, detail=f"WhatsApp service error: {exc.detail}")
     except httpx.HTTPError:
-        raise HTTPException(status_code=502, detail="Cannot reach Evolution API. Is Docker running?")
+        raise HTTPException(status_code=502, detail="WhatsApp service is unavailable. Try again shortly.")
 
     acc = Account(
         label=body.label,
@@ -91,9 +91,9 @@ async def get_qr(account_id: int, db: Session = Depends(get_db)):
     try:
         result = await evolution.connect_instance(acc.instance_name)
     except evolution.EvolutionError as exc:
-        raise HTTPException(status_code=502, detail=f"Evolution: {exc.detail}")
+        raise HTTPException(status_code=502, detail=f"WhatsApp service: {exc.detail}")
     except httpx.HTTPError:
-        raise HTTPException(status_code=502, detail="Cannot reach Evolution API")
+        raise HTTPException(status_code=502, detail="WhatsApp service is unavailable")
 
     # QR can be in result.qrcode.base64 or result.base64
     qr = None
@@ -120,7 +120,7 @@ async def disconnect_account(account_id: int, db: Session = Depends(get_db)):
     except evolution.EvolutionError:
         pass  # Already disconnected
     except httpx.HTTPError:
-        raise HTTPException(status_code=502, detail="Cannot reach Evolution API")
+        raise HTTPException(status_code=502, detail="WhatsApp service is unavailable")
 
     acc.status = "disconnected"
     db.commit()
@@ -138,7 +138,7 @@ async def delete_account(account_id: int, db: Session = Depends(get_db)):
     except evolution.EvolutionError:
         pass  # Instance may already be gone
     except httpx.HTTPError:
-        raise HTTPException(status_code=502, detail="Cannot reach Evolution API")
+        raise HTTPException(status_code=502, detail="WhatsApp service is unavailable")
 
     db.delete(acc)
     db.commit()
