@@ -209,6 +209,7 @@ def process_rows(
     phone_col = mapping.get("phone")
     cc_col = mapping.get("country_code")
     country_name_col = mapping.get("country_name")
+    wa_copy_col = mapping.get("whatsapp_copy")
     mapped_keys = {v for v in mapping.values() if v}
 
     seen: set[str] = set()
@@ -238,6 +239,7 @@ def process_rows(
         last_name = (row.get(last_name_col) or "").strip() if last_name_col else None
         name = (row.get(name_col) or "").strip() if name_col else None
         email = (row.get(email_col) or "").strip() if email_col else None
+        wa_copy = (row.get(wa_copy_col) or "").strip() if wa_copy_col else None
 
         # Auto-derive name from first + last if no explicit name column
         if not name and (first_name or last_name):
@@ -261,6 +263,7 @@ def process_rows(
             "email": email or None,
             "country_code": final_cc,
             "phone": phone,
+            "whatsapp_copy": wa_copy or None,
             "extra": json.dumps(extra_cols) if extra_cols else None,
         })
 
@@ -288,7 +291,7 @@ def render_template(template: str, contact: dict) -> str:
         except (json.JSONDecodeError, TypeError):
             pass
 
-    DIRECT_FIELDS = ("first_name", "last_name", "name", "email", "phone", "country_code")
+    DIRECT_FIELDS = ("first_name", "last_name", "name", "email", "phone", "country_code", "whatsapp_copy")
 
     def _replace(m: re.Match) -> str:
         key = m.group(1)

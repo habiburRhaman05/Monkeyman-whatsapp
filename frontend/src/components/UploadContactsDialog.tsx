@@ -24,7 +24,8 @@ export default function UploadContactsDialog({ onClose, onDone }: Props) {
     phone: string | null;
     country_code: string | null;
     country_name: string | null;
-  }>({ first_name: null, last_name: null, name: null, email: null, phone: null, country_code: null, country_name: null });
+    whatsapp_copy: string | null;
+  }>({ first_name: null, last_name: null, name: null, email: null, phone: null, country_code: null, country_name: null, whatsapp_copy: null });
   const [tag, setTag] = useState("");
   const [defaultCC, setDefaultCC] = useState("");
   const [loading, setLoading] = useState(false);
@@ -83,6 +84,7 @@ export default function UploadContactsDialog({ onClose, onDone }: Props) {
     { key: "email" as const, label: "Email", required: false, hint: "" },
     { key: "country_code" as const, label: "Country code", required: false, hint: "e.g. column with 1, 44, 880" },
     { key: "country_name" as const, label: "Country name", required: false, hint: "e.g. USA, Bangladesh — auto-converts to dial code" },
+    { key: "whatsapp_copy" as const, label: "WhatsApp Copy", required: false, hint: "Pre-written message per contact — use as {{whatsapp_copy}} in campaigns" },
   ];
 
   return (

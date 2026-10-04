@@ -103,9 +103,10 @@ def _get_contact_dict(run: CampaignRun, db) -> dict:
                 "email": uc.email or "",
                 "phone": uc.phone or run.phone,
                 "country_code": uc.country_code or "",
+                "whatsapp_copy": uc.whatsapp_copy or "",
                 "extra": uc.extra,
             }
-    return {"phone": run.phone, "name": "", "first_name": "", "last_name": "", "email": ""}
+    return {"phone": run.phone, "name": "", "first_name": "", "last_name": "", "email": "", "whatsapp_copy": ""}
 
 
 async def _process_run(run: CampaignRun, campaign: Campaign, db) -> None:

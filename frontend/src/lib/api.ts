@@ -318,6 +318,7 @@ export interface UploadPreview {
     phone: string | null;
     country_code: string | null;
     country_name: string | null;
+    whatsapp_copy: string | null;
   };
   total_rows: number;
 }
@@ -352,6 +353,7 @@ export async function uploadContacts(
     phone?: string | null;
     country_code?: string | null;
     country_name?: string | null;
+    whatsapp_copy?: string | null;
   },
   defaultCountryCode?: string,
 ): Promise<UploadResult> {
@@ -365,6 +367,7 @@ export async function uploadContacts(
   if (mapping.phone) form.append("mapping_phone", mapping.phone);
   if (mapping.country_code) form.append("mapping_country_code", mapping.country_code);
   if (mapping.country_name) form.append("mapping_country_name", mapping.country_name);
+  if (mapping.whatsapp_copy) form.append("mapping_whatsapp_copy", mapping.whatsapp_copy);
   if (defaultCountryCode) form.append("default_country_code", defaultCountryCode);
   const res = await fetch(`${API_BASE}/contact-uploads`, { method: "POST", body: form });
   if (!res.ok) {

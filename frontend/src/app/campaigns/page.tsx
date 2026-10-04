@@ -134,7 +134,7 @@ export default function CampaignsPage() {
   const [logsFilter, setLogsFilter] = useState<string>("");
 
   // Template variables
-  const BUILTIN_FIELDS = ["first_name", "name", "company", "email", "phone"];
+  const BUILTIN_FIELDS = ["first_name", "name", "company", "email", "phone", "whatsapp_copy"];
   const [contactFields, setContactFields] = useState<string[]>(BUILTIN_FIELDS);
   const taRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const canvasRef = useRef<HTMLDivElement>(null);

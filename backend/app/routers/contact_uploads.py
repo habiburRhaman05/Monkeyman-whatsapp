@@ -44,6 +44,7 @@ def contact_out(c: UploadedContact) -> dict:
         "email": c.email,
         "country_code": c.country_code,
         "phone": c.phone,
+        "whatsapp_copy": c.whatsapp_copy,
         "extra": c.extra,
         "wa_status": c.wa_status,
         "wa_jid": c.wa_jid,
@@ -104,6 +105,7 @@ async def upload_contacts(
     mapping_phone: str | None = Form(None),
     mapping_country_code: str | None = Form(None),
     mapping_country_name: str | None = Form(None),
+    mapping_whatsapp_copy: str | None = Form(None),
     default_country_code: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
@@ -132,6 +134,7 @@ async def upload_contacts(
         "phone": mapping_phone,
         "country_code": mapping_country_code,
         "country_name": mapping_country_name,
+        "whatsapp_copy": mapping_whatsapp_copy,
     }
     if not mapping["phone"]:
         raise HTTPException(400, "Phone column mapping is required")
@@ -161,6 +164,7 @@ async def upload_contacts(
             email=row["email"],
             country_code=row["country_code"],
             phone=row["phone"],
+            whatsapp_copy=row.get("whatsapp_copy"),
             extra=row["extra"],
         ))
 
@@ -339,7 +343,7 @@ def list_contact_fields(db: Session = Depends(get_db)):
     Built-in: first_name, last_name, name, email, phone.
     Extra: discovered from the `extra` JSON of uploaded contacts.
     """
-    builtins = ["first_name", "last_name", "name", "email", "phone"]
+    builtins = ["first_name", "last_name", "name", "email", "phone", "whatsapp_copy"]
     extra_keys: set[str] = set()
     rows = db.query(UploadedContact.extra).filter(UploadedContact.extra.isnot(None)).limit(500).all()
     for (raw,) in rows:
