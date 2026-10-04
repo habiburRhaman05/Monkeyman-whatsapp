@@ -241,6 +241,32 @@ async def get_media_base64(instance_name: str, wa_message_id: str) -> dict[str, 
     )
 
 
+# ── WhatsApp number check ──────────────────────────────
+
+async def check_is_on_whatsapp(
+    instance_name: str, numbers: list[str]
+) -> list[dict[str, Any]]:
+    """POST /chat/whatsappNumbers/{instance} {numbers:[...]}
+
+    Returns list of {exists: bool, jid: str, number: str} for each number.
+    Evolution API v2 endpoint for checking if phone numbers are on WhatsApp.
+    """
+    data = await _request(
+        "POST",
+        f"/chat/whatsappNumbers/{instance_name}",
+        json={"numbers": numbers},
+    )
+    # Response is typically a list of results
+    if isinstance(data, list):
+        return data
+    # Some versions wrap in a key
+    if isinstance(data, dict) and isinstance(data.get("result"), list):
+        return data["result"]
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return data["data"]
+    return data if isinstance(data, list) else []
+
+
 # ── Group participant helpers ────────────────────────────
 
 async def find_all_group_participants(instance_name: str, group_jids: list[str]) -> dict[str, str]:

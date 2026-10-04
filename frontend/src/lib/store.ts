@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Account, Chat, Contact, Label, Message, MsgStatus, QuickReply } from "./api";
+import type { Account, Campaign, Chat, Contact, ContactBatch, Label, Message, MsgStatus, QuickReply, UploadedContact } from "./api";
 
 export interface Toast {
   id: number;
@@ -40,6 +40,10 @@ interface State {
   editing: Message | null;
   labels: Label[];
   quickReplies: QuickReply[];
+  batches: ContactBatch[];
+  uploadedContacts: UploadedContact[];
+  uploadedTotal: number;
+  campaigns: Campaign[];
 
   setAccounts: (a: Account[]) => void;
   patchAccount: (id: number, patch: Partial<Account>) => void;
@@ -65,6 +69,9 @@ interface State {
   setEditing: (m: Message | null) => void;
   setLabels: (l: Label[]) => void;
   setQuickReplies: (r: QuickReply[]) => void;
+  setBatches: (b: ContactBatch[]) => void;
+  setUploadedContacts: (c: UploadedContact[], total: number) => void;
+  setCampaigns: (c: Campaign[]) => void;
 }
 
 const STATUS_RANK: Record<MsgStatus, number> = { pending: 0, failed: 1, sent: 2, delivered: 3, read: 4 };
@@ -102,6 +109,10 @@ export const useStore = create<State>((set) => ({
   editing: null,
   labels: [],
   quickReplies: [],
+  batches: [],
+  uploadedContacts: [],
+  uploadedTotal: 0,
+  campaigns: [],
 
   setAccounts: (accounts) => set({ accounts, accountsLoaded: true }),
   patchAccount: (id, patch) =>
@@ -176,6 +187,9 @@ export const useStore = create<State>((set) => ({
   setEditing: (editing) => set({ editing, replyTo: null }),
   setLabels: (labels) => set({ labels }),
   setQuickReplies: (quickReplies) => set({ quickReplies }),
+  setBatches: (batches) => set({ batches }),
+  setUploadedContacts: (uploadedContacts, uploadedTotal) => set({ uploadedContacts, uploadedTotal }),
+  setCampaigns: (campaigns) => set({ campaigns }),
 }));
 
 export const totalUnread = (accounts: Account[]) => accounts.reduce((n, a) => n + (a.unread_total || 0), 0);

@@ -87,7 +87,7 @@ export default function TopBar() {
         {perm === "default" && (
           <button
             onClick={askPermission}
-            className="text-xs bg-white/15 hover:bg-white/25 rounded-full px-3 py-1.5 whitespace-nowrap"
+            className="text-xs bg-white/15 hover:bg-white/25 rounded-full px-3 py-1.5 whitespace-nowrap hidden md:block"
           >
             Enable desktop alerts
           </button>
@@ -109,8 +109,20 @@ export default function TopBar() {
             <Icon d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 010 7M19 5a10 10 0 010 14" />
           )}
         </button>
+        <Link href="/contacts" className="text-sm px-3 py-1.5 rounded-full hover:bg-white/15 hidden sm:flex items-center gap-1.5">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+          </svg>
+          Contacts
+        </Link>
+        <Link href="/campaigns" className="text-sm px-3 py-1.5 rounded-full hover:bg-white/15 hidden sm:flex items-center gap-1.5">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><path d="M22 6l-10 7L2 6" />
+          </svg>
+          Campaigns
+        </Link>
         <Link href="/accounts" className="text-sm px-3 py-1.5 rounded-full hover:bg-white/15 hidden sm:block">
-          Manage numbers
+          Manage
         </Link>
       </div>
     </header>

@@ -11,7 +11,7 @@ from app import evolution
 from app.config import settings
 from app.db import Base, SessionLocal, engine, run_migrations
 from app.models import Account
-from app.routers import accounts, chats, organize, webhook
+from app.routers import accounts, campaigns, chats, contact_uploads, organize, webhook
 from app.sync import sync_account
 from app.ws import manager
 
@@ -61,9 +61,13 @@ async def _reapply_webhooks_and_sync() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    task = asyncio.create_task(_reapply_webhooks_and_sync())
+    from app.campaign_engine import campaign_loop
+
+    webhook_task = asyncio.create_task(_reapply_webhooks_and_sync())
+    campaign_task = asyncio.create_task(campaign_loop())
     yield
-    task.cancel()
+    webhook_task.cancel()
+    campaign_task.cancel()
 
 
 app = FastAPI(title="WhatsApp Dashboard", version="0.1.0", lifespan=lifespan)
@@ -81,6 +85,8 @@ app.include_router(accounts.router)
 app.include_router(chats.router)
 app.include_router(organize.router)
 app.include_router(webhook.router)
+app.include_router(contact_uploads.router)
+app.include_router(campaigns.router)
 
 
 @app.get("/health")

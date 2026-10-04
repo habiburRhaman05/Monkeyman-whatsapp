@@ -127,3 +127,123 @@ class Message(Base):
     media_filename: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
     chat: Mapped["Chat"] = relationship(back_populates="messages")
+
+
+class ContactBatch(Base):
+    """One CSV/XLSX upload run, tied to a Label (tag)."""
+
+    __tablename__ = "contact_batches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tag: Mapped[str] = mapped_column(String(40), nullable=False)
+    label_id: Mapped[int] = mapped_column(ForeignKey("labels.id"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(300), nullable=False)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    contacts: Mapped[list["UploadedContact"]] = relationship(back_populates="batch", cascade="all, delete-orphan")
+
+
+class UploadedContact(Base):
+    """A contact row from a CSV/XLSX upload. Never synced to the phone."""
+
+    __tablename__ = "uploaded_contacts"
+    __table_args__ = (UniqueConstraint("batch_id", "phone"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("contact_batches.id"), nullable=False, index=True)
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    country_code: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    whatsapp_copy: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wa_status: Mapped[str] = mapped_column(String(10), default="unchecked")  # unchecked | yes | no
+    wa_jid: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    batch: Mapped["ContactBatch"] = relationship(back_populates="contacts")
+
+
+# ── Campaigns ────────────────────────────────────────────────
+
+class Campaign(Base):
+    __tablename__ = "campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | active | paused
+    trigger_type: Mapped[str] = mapped_column(String(20), default="manual")  # manual | tag_added
+    trigger_label_id: Mapped[int | None] = mapped_column(ForeignKey("labels.id"), nullable=True)
+    sender_account_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of account IDs
+    nodes: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of node dicts
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    runs: Mapped[list["CampaignRun"]] = relationship(back_populates="campaign", cascade="all, delete-orphan")
+    events: Mapped[list["CampaignEvent"]] = relationship(cascade="all, delete-orphan")
+
+
+class ContactSender(Base):
+    """Sticky number assignment: once a phone is paired with a number, it stays."""
+
+    __tablename__ = "contact_senders"
+
+    phone: Mapped[str] = mapped_column(String(20), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    first_assigned_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class CampaignNodeState(Base):
+    """Per-node per-number state: variant counter and drip release clock."""
+
+    __tablename__ = "campaign_node_state"
+
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), primary_key=True)
+    node_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), primary_key=True)
+    variant_counter: Mapped[int] = mapped_column(Integer, default=0)
+    last_release_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CampaignRun(Base):
+    """One contact progressing through one campaign, bound to one sender number."""
+
+    __tablename__ = "campaign_runs"
+    __table_args__ = (UniqueConstraint("campaign_id", "phone"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    jid: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    uploaded_contact_id: Mapped[int | None] = mapped_column(ForeignKey("uploaded_contacts.id"), nullable=True)
+    chat_id: Mapped[int | None] = mapped_column(ForeignKey("chats.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | waiting | queued | completed | replied | stopped | failed | skipped
+    node_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    campaign: Mapped["Campaign"] = relationship(back_populates="runs")
+
+
+class CampaignEvent(Base):
+    """Audit log of everything that happened in a campaign run."""
+
+    __tablename__ = "campaign_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("campaign_runs.id"), nullable=False, index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    node_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # sent | waited | released | replied | skipped | failed | completed | reassigned
+    variant_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

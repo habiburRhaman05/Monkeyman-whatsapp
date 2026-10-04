@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from app import evolution
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Account, Message
+from app.models import Account, Campaign, CampaignEvent, CampaignRun, Message
 from app.normalize import better_status, map_status, parse_edit, parse_message, parse_reaction, parse_revoke
 from app.serializers import chat_out, message_out, unread_total
 from app.services import apply_edit, apply_reaction, apply_revoke, store_message
@@ -193,6 +193,8 @@ async def _handle_messages_upsert(instance_name: str, body: dict) -> None:
                 logger.debug("Duplicate message wa_id=%s (already stored)", p.wa_id)
                 continue
             logger.info("New message stored: chat=%s type=%s from_me=%s", chat.id, p.type, p.from_me)
+            if not p.from_me and chat.jid:
+                _check_campaign_reply(db, acc.id, chat.jid)
             total = unread_total(db, acc.id)
             await manager.broadcast(
                 "message.new",
@@ -268,6 +270,35 @@ async def _handle_messages_update(instance_name: str, body: dict) -> None:
             )
     finally:
         db.close()
+
+
+def _check_campaign_reply(db, account_id: int, sender_jid: str) -> None:
+    """If the sender has any active/waiting campaign runs, mark them as 'replied'."""
+    phone = sender_jid.split("@")[0].split(":")[0]
+    if not phone:
+        return
+    runs = db.query(CampaignRun).filter(
+        CampaignRun.account_id == account_id,
+        CampaignRun.phone == phone,
+        CampaignRun.status.in_(("active", "waiting", "queued")),
+    ).all()
+    for run in runs:
+        camp = db.get(Campaign, run.campaign_id)
+        if not camp or camp.status != "active":
+            continue
+        run.status = "replied"
+        run.next_run_at = None
+        db.add(CampaignEvent(
+            run_id=run.id,
+            campaign_id=run.campaign_id,
+            account_id=run.account_id,
+            node_id=run.node_id,
+            kind="replied",
+            detail=f"Contact replied from {sender_jid}",
+        ))
+        logger.info("Campaign run %d marked as replied (phone=%s)", run.id, phone)
+    if runs:
+        db.commit()
 
 
 async def _handle_presence_update(instance_name: str, body: dict) -> None:

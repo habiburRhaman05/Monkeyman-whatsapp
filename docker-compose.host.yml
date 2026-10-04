@@ -1,11 +1,3 @@
-# Use this instead of docker-compose.yml when container-to-container networking is broken
-# (seen in GitHub Codespaces: "P1001 Can't reach database server at postgres:5432").
-# All services use the host network, so they talk over localhost.
-#
-#   docker compose -f docker-compose.host.yml up -d
-#
-# With this file set WEBHOOK_BASE_URL=http://localhost:8000 in .env
-# (Evolution runs on the host network, so host.docker.internal is not needed).
 
 services:
   postgres:

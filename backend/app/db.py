@@ -51,6 +51,11 @@ def run_migrations() -> None:
             ("muted", "BOOLEAN DEFAULT FALSE"),
         ],
         "contacts": [("profile_pic_url", "VARCHAR(500)")],
+        "uploaded_contacts": [
+            ("first_name", "VARCHAR(100)"),
+            ("last_name", "VARCHAR(100)"),
+            ("email", "VARCHAR(200)"),
+        ],
         "messages": [
             ("quoted_message_id", "VARCHAR(120)"),
             ("quoted_sender", "VARCHAR(200)"),

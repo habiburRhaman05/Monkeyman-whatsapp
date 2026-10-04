@@ -279,3 +279,206 @@ export const searchMessages = (accountId: number, chatId: number, q: string) =>
 
 export const sendTyping = (accountId: number, chatId: number) =>
   post(`/accounts/${accountId}/chats/${chatId}/typing`);
+
+// ── Contact uploads ─────────────────────────────────
+
+export interface ContactBatch {
+  id: number;
+  tag: string;
+  label_id: number;
+  filename: string;
+  total: number;
+  created_at: string | null;
+  counts?: { total: number; yes: number; no: number; unchecked: number };
+}
+
+export interface UploadedContact {
+  id: number;
+  batch_id: number;
+  first_name: string | null;
+  last_name: string | null;
+  name: string | null;
+  email: string | null;
+  country_code: string | null;
+  phone: string;
+  extra: string | null;
+  wa_status: "unchecked" | "yes" | "no";
+  wa_jid: string | null;
+  checked_at: string | null;
+}
+
+export interface UploadPreview {
+  columns: string[];
+  rows: Record<string, string>[];
+  mapping: {
+    first_name: string | null;
+    last_name: string | null;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    country_code: string | null;
+    country_name: string | null;
+  };
+  total_rows: number;
+}
+
+export interface UploadResult {
+  batch: ContactBatch;
+  label: Label;
+  inserted: number;
+  duplicates: number;
+  invalid: number;
+}
+
+export async function previewUpload(file: File): Promise<UploadPreview> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/contact-uploads/preview`, { method: "POST", body: form });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.detail || res.statusText);
+  }
+  return res.json();
+}
+
+export async function uploadContacts(
+  file: File,
+  tag: string,
+  mapping: {
+    first_name?: string | null;
+    last_name?: string | null;
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    country_code?: string | null;
+    country_name?: string | null;
+  },
+  defaultCountryCode?: string,
+): Promise<UploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("tag", tag);
+  if (mapping.first_name) form.append("mapping_first_name", mapping.first_name);
+  if (mapping.last_name) form.append("mapping_last_name", mapping.last_name);
+  if (mapping.name) form.append("mapping_name", mapping.name);
+  if (mapping.email) form.append("mapping_email", mapping.email);
+  if (mapping.phone) form.append("mapping_phone", mapping.phone);
+  if (mapping.country_code) form.append("mapping_country_code", mapping.country_code);
+  if (mapping.country_name) form.append("mapping_country_name", mapping.country_name);
+  if (defaultCountryCode) form.append("default_country_code", defaultCountryCode);
+  const res = await fetch(`${API_BASE}/contact-uploads`, { method: "POST", body: form });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.detail || res.statusText);
+  }
+  return res.json();
+}
+
+export const listContactFields = () => request<{ fields: string[] }>("/contact-fields");
+export const checkWhatsApp = (body: { batch_id?: number; contact_ids?: number[]; account_id: number }) =>
+  post<{ checked: number; yes: number; no: number; message?: string }>("/uploaded-contacts/check-whatsapp", body);
+export const listBatches = () => request<ContactBatch[]>("/contact-batches");
+export const deleteBatch = (id: number) => request<{ ok: boolean }>(`/contact-batches/${id}`, { method: "DELETE" });
+
+export const listUploadedContacts = (params: { batch_id?: number; wa?: string; q?: string; limit?: number; offset?: number }) => {
+  const sp = new URLSearchParams();
+  if (params.batch_id != null) sp.set("batch_id", String(params.batch_id));
+  if (params.wa) sp.set("wa", params.wa);
+  if (params.q) sp.set("q", params.q);
+  if (params.limit) sp.set("limit", String(params.limit));
+  if (params.offset) sp.set("offset", String(params.offset));
+  return request<{ contacts: UploadedContact[]; total: number }>(`/uploaded-contacts?${sp}`);
+};
+
+// ── Campaigns ─────────────────────────────────────────
+
+export interface CampaignNode {
+  id: string;
+  type: "message" | "wait" | "drip";
+  variants?: string[];
+  amount?: number;
+  unit?: "minutes" | "hours" | "days";
+  batch_size?: number;
+  check_reply?: boolean;
+}
+
+export interface CampaignCounts {
+  total: number;
+  active: number;
+  completed: number;
+  replied: number;
+  failed: number;
+}
+
+export interface Campaign {
+  id: number;
+  name: string;
+  status: "draft" | "active" | "paused";
+  trigger_type: "manual" | "tag_added";
+  trigger_label_id: number | null;
+  sender_account_ids: number[];
+  nodes: CampaignNode[];
+  created_at: string | null;
+  updated_at: string | null;
+  counts?: CampaignCounts;
+}
+
+export interface CampaignRun {
+  id: number;
+  campaign_id: number;
+  account_id: number;
+  phone: string;
+  jid: string | null;
+  uploaded_contact_id: number | null;
+  chat_id: number | null;
+  status: string;
+  node_id: string | null;
+  next_run_at: string | null;
+  last_sent_at: string | null;
+  enrolled_at: string | null;
+  contact_name?: string | null;
+}
+
+export interface CampaignEvent {
+  id: number;
+  run_id: number;
+  node_id: string | null;
+  kind: string;
+  variant_index: number | null;
+  detail: string | null;
+  at: string | null;
+}
+
+export interface CampaignBody {
+  name: string;
+  trigger_type?: string;
+  trigger_label_id?: number | null;
+  sender_account_ids?: number[];
+  nodes?: CampaignNode[];
+}
+
+export const listCampaigns = () => request<Campaign[]>("/campaigns");
+export const getCampaign = (id: number) => request<Campaign>(`/campaigns/${id}`);
+export const createCampaign = (body: CampaignBody) => post<Campaign>("/campaigns", body);
+export const updateCampaign = (id: number, body: CampaignBody) =>
+  request<Campaign>(`/campaigns/${id}`, { method: "PUT", body: JSON.stringify(body) });
+export const deleteCampaign = (id: number) => request<{ ok: boolean }>(`/campaigns/${id}`, { method: "DELETE" });
+export const setCampaignStatus = (id: number, status: "active" | "paused") =>
+  post<Campaign>(`/campaigns/${id}/status`, { status });
+export const enrollContacts = (campaignId: number, body: { batch_id?: number; contact_ids?: number[] }) =>
+  post<{ enrolled: number; skipped: number }>(`/campaigns/${campaignId}/enroll`, body);
+
+export const listCampaignRuns = (id: number, params?: { status?: string; limit?: number; offset?: number }) => {
+  const sp = new URLSearchParams();
+  if (params?.status) sp.set("status", params.status);
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.offset) sp.set("offset", String(params.offset));
+  return request<{ runs: CampaignRun[]; total: number }>(`/campaigns/${id}/runs?${sp}`);
+};
+
+export const listCampaignEvents = (id: number, params?: { run_id?: number; limit?: number }) => {
+  const sp = new URLSearchParams();
+  if (params?.run_id) sp.set("run_id", String(params.run_id));
+  if (params?.limit) sp.set("limit", String(params.limit));
+  return request<{ events: CampaignEvent[]; total: number }>(`/campaigns/${id}/events?${sp}`);
+};
