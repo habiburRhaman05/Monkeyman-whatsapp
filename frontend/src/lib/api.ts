@@ -500,3 +500,62 @@ export const listCampaignEvents = (id: number, params?: { run_id?: number; limit
   if (params?.limit) sp.set("limit", String(params.limit));
   return request<{ events: CampaignEvent[]; total: number }>(`/campaigns/${id}/events?${sp}`);
 };
+
+// ── Immediate Start ──────────────────────────────────
+
+export interface SenderAssignment {
+  account_id: number;
+  contact_ids: number[];
+}
+
+export interface ImmediateStartBody {
+  sender_assignments: SenderAssignment[];
+  delay: number;
+}
+
+export interface ImmediateSessionResponse {
+  session_id: number;
+  status: string;
+  campaign_id?: number;
+}
+
+export interface ImmediateProgressResponse {
+  session_id: number;
+  status: string;
+  current_node_index: number;
+  progress: {
+    nodes: Array<{
+      node_index: number;
+      node_id: string;
+      type: string;
+      senders?: Array<{ sent: number; failed: number; account_id: number }>;
+      wait_seconds?: number;
+      replied_during_wait?: number;
+    }>;
+    replied_contacts: number[];
+  } | null;
+  contacts: Array<{
+    contact_id: number;
+    phone: string;
+    name: string;
+    status: string;
+    node_id: string | null;
+  }>;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export const immediateStart = (campaignId: number, body: ImmediateStartBody) =>
+  post<ImmediateSessionResponse>(`/campaigns/${campaignId}/immediate-start`, body);
+
+export const immediateLaunch = (campaignId: number, sessionId: number) =>
+  post<ImmediateSessionResponse>(`/campaigns/${campaignId}/immediate-launch/${sessionId}`, {});
+
+export const immediatePause = (campaignId: number, sessionId: number) =>
+  post<ImmediateSessionResponse>(`/campaigns/${campaignId}/immediate-pause/${sessionId}`, {});
+
+export const immediateStop = (campaignId: number, sessionId: number) =>
+  post<ImmediateSessionResponse>(`/campaigns/${campaignId}/immediate-stop/${sessionId}`, {});
+
+export const immediateProgress = (campaignId: number, sessionId: number) =>
+  request<ImmediateProgressResponse>(`/campaigns/${campaignId}/immediate-progress/${sessionId}`);

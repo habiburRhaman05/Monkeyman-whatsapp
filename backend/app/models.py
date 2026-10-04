@@ -233,6 +233,21 @@ class CampaignRun(Base):
     campaign: Mapped["Campaign"] = relationship(back_populates="runs")
 
 
+class ImmediateSession(Base):
+    """One immediate-start campaign execution session."""
+
+    __tablename__ = "immediate_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), nullable=False, index=True)
+    config: Mapped[str] = mapped_column(Text, nullable=False)  # JSON: {sender_assignments, delay, contact_ids}
+    status: Mapped[str] = mapped_column(String(20), default="warmup")  # warmup | running | paused | completed | failed
+    progress: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: per-step, per-sender stats
+    current_node_index: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class CampaignEvent(Base):
     """Audit log of everything that happened in a campaign run."""
 

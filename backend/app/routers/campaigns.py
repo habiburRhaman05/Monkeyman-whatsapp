@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import campaign_settings
 from app.db import get_db
-from app.models import Account, Campaign, CampaignEvent, CampaignNodeState, CampaignRun, Label, UploadedContact
+from app.models import Account, Campaign, CampaignEvent, CampaignNodeState, CampaignRun, ImmediateSession, Label, UploadedContact
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
@@ -425,3 +425,150 @@ def stop_run(campaign_id: int, run_id: int, db: Session = Depends(get_db)):
     r.next_run_at = None
     db.commit()
     return run_out(r, db)
+
+
+# ── Immediate Start ───────────────────────────────────
+
+
+class SenderAssignment(BaseModel):
+    account_id: int
+    contact_ids: list[int]
+
+
+class ImmediateStartBody(BaseModel):
+    sender_assignments: list[SenderAssignment]
+    delay: int = Field(default=10, ge=1)
+
+
+@router.post("/{campaign_id}/immediate-start")
+def immediate_start(campaign_id: int, body: ImmediateStartBody, db: Session = Depends(get_db)):
+    c = db.get(Campaign, campaign_id)
+    if not c:
+        raise HTTPException(404, "Campaign not found")
+
+    nodes = _parse_nodes(c.nodes)
+    if not nodes:
+        raise HTTPException(400, "Campaign has no nodes")
+
+    for sa in body.sender_assignments:
+        acc = db.get(Account, sa.account_id)
+        if not acc:
+            raise HTTPException(400, f"Account {sa.account_id} not found")
+        if not sa.contact_ids:
+            raise HTTPException(400, f"No contacts assigned to account {sa.account_id}")
+
+    existing = db.query(ImmediateSession).filter(
+        ImmediateSession.campaign_id == campaign_id,
+        ImmediateSession.status.in_(("warmup", "running", "paused")),
+    ).first()
+    if existing:
+        raise HTTPException(409, "An immediate session is already active for this campaign")
+
+    config = {
+        "sender_assignments": [sa.model_dump() for sa in body.sender_assignments],
+        "delay": body.delay,
+    }
+
+    sess = ImmediateSession(
+        campaign_id=campaign_id,
+        config=json.dumps(config),
+        status="warmup",
+    )
+    db.add(sess)
+    db.commit()
+    db.refresh(sess)
+
+    return {
+        "session_id": sess.id,
+        "status": sess.status,
+        "campaign_id": campaign_id,
+    }
+
+
+@router.post("/{campaign_id}/immediate-launch/{session_id}")
+async def immediate_launch(campaign_id: int, session_id: int, db: Session = Depends(get_db)):
+    from app.immediate_engine import start_immediate
+
+    sess = db.get(ImmediateSession, session_id)
+    if not sess or sess.campaign_id != campaign_id:
+        raise HTTPException(404, "Session not found")
+    if sess.status != "warmup":
+        raise HTTPException(409, f"Session is {sess.status}, expected warmup")
+
+    sess.status = "running"
+    db.commit()
+
+    start_immediate(session_id)
+
+    return {"session_id": session_id, "status": "running"}
+
+
+@router.post("/{campaign_id}/immediate-pause/{session_id}")
+def immediate_pause(campaign_id: int, session_id: int, db: Session = Depends(get_db)):
+    from app.immediate_engine import pause_immediate, resume_immediate
+
+    sess = db.get(ImmediateSession, session_id)
+    if not sess or sess.campaign_id != campaign_id:
+        raise HTTPException(404, "Session not found")
+
+    if sess.status == "running":
+        pause_immediate(session_id)
+        return {"session_id": session_id, "status": "paused"}
+    elif sess.status == "paused":
+        resume_immediate(session_id)
+        return {"session_id": session_id, "status": "running"}
+    else:
+        raise HTTPException(409, f"Session is {sess.status}")
+
+
+@router.post("/{campaign_id}/immediate-stop/{session_id}")
+def immediate_stop(campaign_id: int, session_id: int, db: Session = Depends(get_db)):
+    from app.immediate_engine import stop_immediate
+
+    sess = db.get(ImmediateSession, session_id)
+    if not sess or sess.campaign_id != campaign_id:
+        raise HTTPException(404, "Session not found")
+
+    stop_immediate(session_id)
+    return {"session_id": session_id, "status": "completed"}
+
+
+@router.get("/{campaign_id}/immediate-progress/{session_id}")
+def immediate_progress(campaign_id: int, session_id: int, db: Session = Depends(get_db)):
+    sess = db.get(ImmediateSession, session_id)
+    if not sess or sess.campaign_id != campaign_id:
+        raise HTTPException(404, "Session not found")
+
+    progress = json.loads(sess.progress) if sess.progress else None
+
+    # Get per-contact status for the report
+    config = json.loads(sess.config)
+    all_contact_ids = []
+    for sa in config.get("sender_assignments", []):
+        all_contact_ids.extend(sa.get("contact_ids", []))
+
+    contact_statuses = []
+    for cid in all_contact_ids:
+        uc = db.get(UploadedContact, cid)
+        if not uc:
+            continue
+        run = db.query(CampaignRun).filter_by(
+            campaign_id=campaign_id, phone=uc.phone
+        ).first()
+        contact_statuses.append({
+            "contact_id": cid,
+            "phone": uc.phone,
+            "name": uc.name or uc.phone,
+            "status": run.status if run else "pending",
+            "node_id": run.node_id if run else None,
+        })
+
+    return {
+        "session_id": sess.id,
+        "status": sess.status,
+        "current_node_index": sess.current_node_index,
+        "progress": progress,
+        "contacts": contact_statuses,
+        "started_at": sess.started_at.isoformat() if sess.started_at else None,
+        "finished_at": sess.finished_at.isoformat() if sess.finished_at else None,
+    }

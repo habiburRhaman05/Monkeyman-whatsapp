@@ -44,6 +44,30 @@ interface State {
   uploadedContacts: UploadedContact[];
   uploadedTotal: number;
   campaigns: Campaign[];
+  immediateSession: {
+    sessionId: number;
+    campaignId: number;
+    status: string;
+    currentNodeIndex: number;
+    nodeResults: Array<{
+      nodeIndex: number;
+      nodeId: string;
+      type: string;
+      sent?: number;
+      failed?: number;
+      repliedDuringWait?: number;
+      waitSeconds?: number;
+      elapsed?: number;
+    }>;
+    contactEvents: Array<{
+      contactId: number;
+      phone: string;
+      name: string;
+      status: "sent" | "failed" | "skipped" | "pending";
+      nodeIndex: number;
+      accountId: number;
+    }>;
+  } | null;
 
   setAccounts: (a: Account[]) => void;
   patchAccount: (id: number, patch: Partial<Account>) => void;
@@ -72,6 +96,8 @@ interface State {
   setBatches: (b: ContactBatch[]) => void;
   setUploadedContacts: (c: UploadedContact[], total: number) => void;
   setCampaigns: (c: Campaign[]) => void;
+  setImmediateSession: (s: State["immediateSession"]) => void;
+  updateImmediateProgress: (data: any) => void;
 }
 
 const STATUS_RANK: Record<MsgStatus, number> = { pending: 0, failed: 1, sent: 2, delivered: 3, read: 4 };
@@ -113,6 +139,7 @@ export const useStore = create<State>((set) => ({
   uploadedContacts: [],
   uploadedTotal: 0,
   campaigns: [],
+  immediateSession: null,
 
   setAccounts: (accounts) => set({ accounts, accountsLoaded: true }),
   patchAccount: (id, patch) =>
@@ -190,6 +217,70 @@ export const useStore = create<State>((set) => ({
   setBatches: (batches) => set({ batches }),
   setUploadedContacts: (uploadedContacts, uploadedTotal) => set({ uploadedContacts, uploadedTotal }),
   setCampaigns: (campaigns) => set({ campaigns }),
+  setImmediateSession: (immediateSession) => set({ immediateSession }),
+  updateImmediateProgress: (data: any) =>
+    set((s) => {
+      const sess = s.immediateSession;
+      if (!sess) return s;
+
+      const kind = data.kind as string;
+
+      if (kind === "node_start") {
+        return { immediateSession: { ...sess, currentNodeIndex: data.node_index } };
+      }
+
+      if (kind === "contact_sent" || kind === "contact_failed" || kind === "contact_skipped") {
+        const status = kind === "contact_sent" ? "sent" as const : kind === "contact_failed" ? "failed" as const : "skipped" as const;
+        const existing = sess.contactEvents.findIndex(
+          (e) => e.contactId === data.contact_id && e.nodeIndex === data.node_index
+        );
+        const evt = {
+          contactId: data.contact_id,
+          phone: data.phone,
+          name: data.name,
+          status,
+          nodeIndex: data.node_index,
+          accountId: data.account_id,
+        };
+        const events = [...sess.contactEvents];
+        if (existing >= 0) events[existing] = evt;
+        else events.push(evt);
+        return { immediateSession: { ...sess, contactEvents: events } };
+      }
+
+      if (kind === "node_complete") {
+        const nr = {
+          nodeIndex: data.node_index,
+          nodeId: data.node_id,
+          type: data.node_type,
+          sent: data.sent,
+          failed: data.failed,
+          repliedDuringWait: data.replied_during_wait,
+        };
+        return { immediateSession: { ...sess, nodeResults: [...sess.nodeResults, nr] } };
+      }
+
+      if (kind === "wait_tick") {
+        const results = [...sess.nodeResults];
+        const idx = results.findIndex((r) => r.nodeIndex === data.node_index);
+        if (idx >= 0) {
+          results[idx] = { ...results[idx], elapsed: data.elapsed, waitSeconds: data.total };
+        } else {
+          results.push({ nodeIndex: data.node_index, nodeId: "", type: "wait", elapsed: data.elapsed, waitSeconds: data.total });
+        }
+        return { immediateSession: { ...sess, nodeResults: results } };
+      }
+
+      if (kind === "completed") {
+        return { immediateSession: { ...sess, status: "completed" } };
+      }
+
+      if (kind === "error") {
+        return { immediateSession: { ...sess, status: "failed" } };
+      }
+
+      return s;
+    }),
 }));
 
 export const totalUnread = (accounts: Account[]) => accounts.reduce((n, a) => n + (a.unread_total || 0), 0);

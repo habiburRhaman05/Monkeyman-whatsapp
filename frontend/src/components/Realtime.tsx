@@ -153,6 +153,10 @@ export default function Realtime() {
         }
       },
 
+      "immediate.progress": (msg) => {
+        useStore.getState().updateImmediateProgress(msg.data);
+      },
+
       "sync.done": (msg) => {
         const s = useStore.getState();
         const id: number = msg.account_id;

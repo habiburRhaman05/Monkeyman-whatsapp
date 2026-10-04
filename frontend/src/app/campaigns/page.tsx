@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import * as api from "@/lib/api";
 import VariablePills from "@/components/VariablePills";
+import ImmediateStart from "@/components/ImmediateStart";
 
 function genId() {
   return Math.random().toString(36).slice(2, 8);
@@ -140,6 +141,7 @@ export default function CampaignsPage() {
   const [runEvents, setRunEvents] = useState<Record<number, api.CampaignEvent[]>>({});
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
   const [logsFilter, setLogsFilter] = useState<string>("");
+  const [showImmediate, setShowImmediate] = useState(false);
 
   // Template variables
   const BUILTIN_FIELDS = ["first_name", "name", "company", "email", "phone", "whatsapp_copy"];
@@ -397,6 +399,12 @@ export default function CampaignsPage() {
                   <button onClick={handleSave} disabled={saving || !name.trim()} className="px-4 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 font-medium transition-colors">
                     {saving ? "Saving…" : editId ? "Save" : "Create"}
                   </button>
+                  {editId && nodes.length > 0 && (
+                    <button onClick={() => setShowImmediate(true)} className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors flex items-center gap-1.5">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
+                      Immediate Start
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1008,6 +1016,12 @@ export default function CampaignsPage() {
           )}
         </main>
       </div>
+
+      {showImmediate && editId && (() => {
+        const camp = campaigns.find((c) => c.id === editId);
+        if (!camp) return null;
+        return <ImmediateStart campaign={camp} onClose={() => setShowImmediate(false)} />;
+      })()}
     </div>
   );
 }
