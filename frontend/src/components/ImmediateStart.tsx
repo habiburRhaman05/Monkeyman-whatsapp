@@ -7,15 +7,19 @@ import * as api from "@/lib/api";
 interface Props {
   campaign: api.Campaign;
   onClose: () => void;
+  recoveredSessionId?: number;
+  recoveredStatus?: string;
 }
 
 type Phase = "config" | "warmup" | "running" | "completed";
 
-export default function ImmediateStart({ campaign, onClose }: Props) {
+export default function ImmediateStart({ campaign, onClose, recoveredSessionId, recoveredStatus }: Props) {
   const accounts = useStore((s) => s.accounts);
   const immediateSession = useStore((s) => s.immediateSession);
 
-  const [phase, setPhase] = useState<Phase>("config");
+  const [phase, setPhase] = useState<Phase>(
+    recoveredSessionId ? (recoveredStatus === "completed" ? "completed" : "running") : "config"
+  );
   const [delay, setDelay] = useState(10);
   const [assignments, setAssignments] = useState<
     Array<{ accountId: number; startIdx: number; endIdx: number }>
@@ -26,14 +30,86 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(30);
-  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [sessionId, setSessionId] = useState<number | null>(recoveredSessionId ?? null);
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const connectedAccounts = accounts.filter((a) => a.status === "connected");
 
+  // Recovery: if we have a recovered session, initialize the store and start polling
+  useEffect(() => {
+    if (recoveredSessionId && !immediateSession) {
+      useStore.getState().setImmediateSession({
+        sessionId: recoveredSessionId,
+        campaignId: campaign.id,
+        status: recoveredStatus || "running",
+        currentNodeIndex: 0,
+        nodeResults: [],
+        contactEvents: [],
+      });
+      pollProgress(recoveredSessionId);
+    }
+  }, [recoveredSessionId]);
+
+  // Poll progress from server every 3s as fallback to WebSocket
+  function startPolling(sid: number) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => pollProgress(sid), 3000);
+  }
+
+  async function pollProgress(sid: number) {
+    try {
+      const resp = await api.immediateProgress(campaign.id, sid);
+      const sess = useStore.getState().immediateSession;
+      if (!sess) return;
+
+      // Build contact events from server response
+      const contactEvents = resp.contacts
+        .filter((c) => c.status !== "pending")
+        .map((c) => ({
+          contactId: c.contact_id,
+          phone: c.phone,
+          name: c.name,
+          status: (c.status === "active" || c.status === "completed" ? "sent" :
+                  c.status === "failed" ? "failed" :
+                  c.status === "replied" ? "skipped" : "sent") as "sent" | "failed" | "skipped" | "pending",
+          nodeIndex: resp.current_node_index,
+          accountId: 0,
+        }));
+
+      // Build node results from server progress
+      const nodeResults = resp.progress?.nodes.map((n) => ({
+        nodeIndex: n.node_index,
+        nodeId: n.node_id,
+        type: n.type,
+        sent: n.senders?.reduce((s, x) => s + (x.sent || 0), 0),
+        failed: n.senders?.reduce((s, x) => s + (x.failed || 0), 0),
+        repliedDuringWait: n.replied_during_wait,
+        waitSeconds: n.wait_seconds,
+      })) || [];
+
+      useStore.getState().setImmediateSession({
+        ...sess,
+        status: resp.status,
+        currentNodeIndex: resp.current_node_index,
+        nodeResults: nodeResults.length > 0 ? nodeResults : sess.nodeResults,
+        contactEvents: contactEvents.length > 0 ? contactEvents : sess.contactEvents,
+      });
+
+      if (resp.status === "completed" || resp.status === "failed") {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setPhase("completed");
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     api.listBatches().then(setBatches).catch(() => {});
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -137,8 +213,10 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
         ...useStore.getState().immediateSession!,
         status: "running",
       });
+      startPolling(sid);
     } catch (e) {
       setError(e instanceof api.ApiError ? e.detail : "Launch failed");
+      setPhase("config");
     }
   }
 
@@ -157,6 +235,9 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
     if (!sessionId) return;
     try {
       await api.immediateStop(campaign.id, sessionId);
+      if (pollRef.current) clearInterval(pollRef.current);
+      // Fetch final progress from server
+      await pollProgress(sessionId);
       setPhase("completed");
       const sess = useStore.getState().immediateSession;
       if (sess) {
@@ -165,17 +246,14 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
     } catch {}
   }
 
+  // Watch for completed status from WebSocket
   useEffect(() => {
     if (immediateSession?.status === "completed" && phase === "running") {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (sessionId) pollProgress(sessionId);
       setPhase("completed");
     }
-  }, [immediateSession?.status, phase]);
-
-  useEffect(() => {
-    return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
-    };
-  }, []);
+  }, [immediateSession?.status]);
 
   function downloadCSV() {
     if (!immediateSession) return;
@@ -266,44 +344,41 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
                 <button onClick={addSender} className="text-xs text-primary hover:underline">+ Add sender</button>
               </div>
               <div className="space-y-3">
-                {assignments.map((a, i) => {
-                  const acc = connectedAccounts.find((ac) => ac.id === a.accountId);
-                  return (
-                    <div key={i} className="flex items-center gap-2 bg-gray-50 p-3 rounded-lg">
-                      <select
-                        value={a.accountId}
-                        onChange={(e) => updateAssignment(i, { accountId: Number(e.target.value) })}
-                        className="flex-1 px-2 py-1.5 text-xs border border-border rounded bg-white"
-                      >
-                        {connectedAccounts.map((ac) => (
-                          <option key={ac.id} value={ac.id}>{ac.label} ({ac.phone_number})</option>
-                        ))}
-                      </select>
-                      <div className="flex items-center gap-1 text-xs">
-                        <input
-                          type="number"
-                          min={1}
-                          value={a.startIdx}
-                          onChange={(e) => updateAssignment(i, { startIdx: Math.max(1, Number(e.target.value)) })}
-                          className="w-16 px-2 py-1.5 border border-border rounded bg-white text-center"
-                        />
-                        <span>-</span>
-                        <input
-                          type="number"
-                          min={a.startIdx}
-                          value={a.endIdx}
-                          onChange={(e) => updateAssignment(i, { endIdx: Math.max(a.startIdx, Number(e.target.value)) })}
-                          className="w-16 px-2 py-1.5 border border-border rounded bg-white text-center"
-                        />
-                      </div>
-                      {assignments.length > 1 && (
-                        <button onClick={() => removeSender(i)} className="p-1 text-red-400 hover:text-red-600">
-                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                        </button>
-                      )}
+                {assignments.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-gray-50 p-3 rounded-lg">
+                    <select
+                      value={a.accountId}
+                      onChange={(e) => updateAssignment(i, { accountId: Number(e.target.value) })}
+                      className="flex-1 px-2 py-1.5 text-xs border border-border rounded bg-white"
+                    >
+                      {connectedAccounts.map((ac) => (
+                        <option key={ac.id} value={ac.id}>{ac.label} ({ac.phone_number})</option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-1 text-xs">
+                      <input
+                        type="number"
+                        min={1}
+                        value={a.startIdx}
+                        onChange={(e) => updateAssignment(i, { startIdx: Math.max(1, Number(e.target.value)) })}
+                        className="w-16 px-2 py-1.5 border border-border rounded bg-white text-center"
+                      />
+                      <span>-</span>
+                      <input
+                        type="number"
+                        min={a.startIdx}
+                        value={a.endIdx}
+                        onChange={(e) => updateAssignment(i, { endIdx: Math.max(a.startIdx, Number(e.target.value)) })}
+                        className="w-16 px-2 py-1.5 border border-border rounded bg-white text-center"
+                      />
                     </div>
-                  );
-                })}
+                    {assignments.length > 1 && (
+                      <button onClick={() => removeSender(i)} className="p-1 text-red-400 hover:text-red-600">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -364,6 +439,7 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
           </div>
           <h2 className="text-xl font-bold mb-2">Warming Up</h2>
           <p className="text-muted text-sm mb-6">Campaign will start in {countdown} seconds</p>
+          {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
           <button
             onClick={() => {
               if (countdownRef.current) clearInterval(countdownRef.current);
@@ -432,7 +508,7 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
               {campaign.nodes.map((node, ni) => {
                 const result = sess.nodeResults.find((r) => r.nodeIndex === ni);
                 const isCurrent = sess.currentNodeIndex === ni;
-                const isComplete = !!result && result.type !== "wait";
+                const isComplete = !!result && result.type === "message";
                 const isWaiting = result?.type === "wait" && result.elapsed !== undefined && result.elapsed < (result.waitSeconds ?? 0);
 
                 return (
@@ -445,7 +521,7 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium capitalize">{node.type} {node.type === "wait" ? `(${node.amount} ${node.unit})` : ""}</div>
                       {result && node.type === "message" && (
-                        <div className="text-xs text-muted">{result.sent} sent / {result.failed} failed</div>
+                        <div className="text-xs text-muted">{result.sent ?? 0} sent / {result.failed ?? 0} failed</div>
                       )}
                       {isWaiting && (
                         <div className="text-xs text-amber-600">
@@ -462,11 +538,11 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
             {/* Live contact feed */}
             <div className="border border-border rounded-lg max-h-48 overflow-y-auto">
               <div className="p-2 bg-gray-50 border-b border-border text-xs font-medium text-muted sticky top-0">
-                Recent activity
+                Recent activity ({sess.contactEvents.length} total)
               </div>
               {sess.contactEvents.slice(-20).reverse().map((evt, i) => (
-                <div key={i} className="px-3 py-1.5 text-xs flex items-center gap-2 border-b border-border/50 last:border-0">
-                  <span className={`w-1.5 h-1.5 rounded-full ${evt.status === "sent" ? "bg-green-500" : evt.status === "failed" ? "bg-red-500" : "bg-teal-500"}`} />
+                <div key={`${evt.contactId}-${evt.nodeIndex}-${i}`} className="px-3 py-1.5 text-xs flex items-center gap-2 border-b border-border/50 last:border-0">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${evt.status === "sent" ? "bg-green-500" : evt.status === "failed" ? "bg-red-500" : "bg-teal-500"}`} />
                   <span className="font-medium truncate flex-1">{evt.name}</span>
                   <span className="text-muted">{evt.phone}</span>
                   <span className={`font-medium ${evt.status === "sent" ? "text-green-600" : evt.status === "failed" ? "text-red-600" : "text-teal-600"}`}>
@@ -530,7 +606,7 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
                   <div className="flex-1">
                     <div className="text-sm font-medium capitalize">{nr.type}</div>
                     {nr.type === "message" && (
-                      <div className="text-xs text-muted">{nr.sent} sent / {nr.failed} failed</div>
+                      <div className="text-xs text-muted">{nr.sent ?? 0} sent / {nr.failed ?? 0} failed</div>
                     )}
                     {nr.type === "wait" && nr.repliedDuringWait !== undefined && (
                       <div className="text-xs text-muted">{nr.repliedDuringWait} replied during wait</div>
@@ -538,29 +614,6 @@ export default function ImmediateStart({ campaign, onClose }: Props) {
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* Per-sender stats */}
-            <h3 className="font-semibold text-sm mb-3">Per Sender</h3>
-            <div className="space-y-2 mb-6">
-              {assignments.map((a) => {
-                const acc = accounts.find((ac) => ac.id === a.accountId);
-                const senderEvents = sess.contactEvents.filter((e) => e.accountId === a.accountId);
-                const senderSent = senderEvents.filter((e) => e.status === "sent").length;
-                const senderFailed = senderEvents.filter((e) => e.status === "failed").length;
-                return (
-                  <div key={a.accountId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">{acc?.label || `Account ${a.accountId}`}</div>
-                      <div className="text-xs text-muted">{acc?.phone_number}</div>
-                    </div>
-                    <div className="flex gap-3 text-xs">
-                      <span className="text-green-600 font-medium">{senderSent} sent</span>
-                      <span className="text-red-600 font-medium">{senderFailed} failed</span>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
 
             {/* Contact list */}

@@ -559,3 +559,15 @@ export const immediateStop = (campaignId: number, sessionId: number) =>
 
 export const immediateProgress = (campaignId: number, sessionId: number) =>
   request<ImmediateProgressResponse>(`/campaigns/${campaignId}/immediate-progress/${sessionId}`);
+
+export interface ImmediateActiveResponse {
+  active: boolean;
+  session_id?: number;
+  status?: string;
+  current_node_index?: number;
+  config?: { sender_assignments: SenderAssignment[]; delay: number };
+  started_at?: string;
+}
+
+export const immediateActive = (campaignId: number) =>
+  request<ImmediateActiveResponse>(`/campaigns/${campaignId}/immediate-active`);

@@ -112,6 +112,7 @@ async def _sender_lane(
             return {"sent": 0, "failed": 0, "account_id": account_id}
 
         for i, cid in enumerate(contact_ids):
+            db.expire_all()
             sess = db.get(ImmediateSession, session_id)
             if not sess or sess.status == "paused":
                 while sess and sess.status == "paused":

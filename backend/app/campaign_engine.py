@@ -23,6 +23,7 @@ from app.models import (
     CampaignRun,
     ContactSender,
     Chat,
+    ImmediateSession,
     UploadedContact,
 )
 
@@ -275,8 +276,19 @@ async def _tick() -> None:
             _auto_complete_campaigns(db)
             return
 
+        # Skip campaigns that have an active immediate session
+        immediate_campaign_ids: set[int] = set()
+        active_immediate = db.query(ImmediateSession.campaign_id).filter(
+            ImmediateSession.status.in_(("warmup", "running", "paused")),
+        ).all()
+        for row in active_immediate:
+            immediate_campaign_ids.add(row[0])
+
         campaign_cache: dict[int, Campaign] = {}
         for run in runs:
+            if run.campaign_id in immediate_campaign_ids:
+                continue
+
             if run.campaign_id not in campaign_cache:
                 camp = db.get(Campaign, run.campaign_id)
                 if camp:

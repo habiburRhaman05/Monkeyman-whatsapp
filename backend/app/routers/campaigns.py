@@ -533,6 +533,26 @@ def immediate_stop(campaign_id: int, session_id: int, db: Session = Depends(get_
     return {"session_id": session_id, "status": "completed"}
 
 
+@router.get("/{campaign_id}/immediate-active")
+def immediate_active(campaign_id: int, db: Session = Depends(get_db)):
+    sess = db.query(ImmediateSession).filter(
+        ImmediateSession.campaign_id == campaign_id,
+        ImmediateSession.status.in_(("warmup", "running", "paused")),
+    ).order_by(ImmediateSession.id.desc()).first()
+    if not sess:
+        return {"active": False}
+
+    config = json.loads(sess.config)
+    return {
+        "active": True,
+        "session_id": sess.id,
+        "status": sess.status,
+        "current_node_index": sess.current_node_index,
+        "config": config,
+        "started_at": sess.started_at.isoformat() if sess.started_at else None,
+    }
+
+
 @router.get("/{campaign_id}/immediate-progress/{session_id}")
 def immediate_progress(campaign_id: int, session_id: int, db: Session = Depends(get_db)):
     sess = db.get(ImmediateSession, session_id)

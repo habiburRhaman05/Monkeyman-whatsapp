@@ -142,6 +142,8 @@ export default function CampaignsPage() {
   const [expandedRun, setExpandedRun] = useState<number | null>(null);
   const [logsFilter, setLogsFilter] = useState<string>("");
   const [showImmediate, setShowImmediate] = useState(false);
+  const [recoveredSessionId, setRecoveredSessionId] = useState<number | undefined>();
+  const [recoveredStatus, setRecoveredStatus] = useState<string | undefined>();
 
   // Template variables
   const BUILTIN_FIELDS = ["first_name", "name", "company", "email", "phone", "whatsapp_copy"];
@@ -178,6 +180,21 @@ export default function CampaignsPage() {
     api.getSenderUsage(browserTz).then((r) => setUsage(r.usage)).catch(() => {});
     api.listBatches().then(setBatches).catch(() => {});
   }, [editorOpen, browserTz]);
+
+  // Check for active immediate session when editing a campaign
+  useEffect(() => {
+    if (!editId) return;
+    api.immediateActive(editId).then((r) => {
+      if (r.active && r.session_id) {
+        setRecoveredSessionId(r.session_id);
+        setRecoveredStatus(r.status);
+        setShowImmediate(true);
+      } else {
+        setRecoveredSessionId(undefined);
+        setRecoveredStatus(undefined);
+      }
+    }).catch(() => {});
+  }, [editId]);
 
   async function loadBatches() {
     try { setBatches(await api.listBatches()); } catch {}
@@ -1020,7 +1037,18 @@ export default function CampaignsPage() {
       {showImmediate && editId && (() => {
         const camp = campaigns.find((c) => c.id === editId);
         if (!camp) return null;
-        return <ImmediateStart campaign={camp} onClose={() => setShowImmediate(false)} />;
+        return (
+          <ImmediateStart
+            campaign={camp}
+            onClose={() => {
+              setShowImmediate(false);
+              setRecoveredSessionId(undefined);
+              setRecoveredStatus(undefined);
+            }}
+            recoveredSessionId={recoveredSessionId}
+            recoveredStatus={recoveredStatus}
+          />
+        );
       })()}
     </div>
   );
