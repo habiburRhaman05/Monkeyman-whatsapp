@@ -49,6 +49,7 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
         contactEvents: [],
       });
       pollProgress(recoveredSessionId);
+      startPolling(recoveredSessionId);
     }
   }, [recoveredSessionId]);
 

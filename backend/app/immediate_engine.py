@@ -122,6 +122,10 @@ async def _sender_lane(
                     sess = db.get(ImmediateSession, session_id)
                 if not sess or sess.status not in ("running", "paused"):
                     break
+                # Reload account from the new db session
+                acc = db.get(Account, account_id)
+                if not acc or acc.status != "connected":
+                    return {"sent": sent, "failed": failed + len(contact_ids) - i, "account_id": account_id}
 
             if sess.status not in ("running",):
                 break
@@ -300,6 +304,8 @@ async def run_immediate(session_id: int) -> None:
                         node_stats["senders"].append(r)
 
                 progress["nodes"].append(node_stats)
+                sess.progress = json.dumps(progress)
+                db.commit()
 
                 total_sent = sum(s.get("sent", 0) for s in node_stats["senders"] if isinstance(s, dict))
                 total_failed = sum(s.get("failed", 0) for s in node_stats["senders"] if isinstance(s, dict))
@@ -403,6 +409,8 @@ async def run_immediate(session_id: int) -> None:
                     "wait_seconds": wait_seconds,
                     "replied_during_wait": replied_count,
                 })
+                sess.progress = json.dumps(progress)
+                db.commit()
 
                 await _broadcast_progress(session_id, sess.campaign_id, {
                     "kind": "node_complete",
@@ -491,6 +499,17 @@ def stop_immediate(session_id: int) -> bool:
         if sess and sess.status in ("running", "paused", "warmup"):
             sess.status = "completed"
             sess.finished_at = _utcnow()
+
+            # Mark remaining active/waiting runs as completed so they don't
+            # linger in the database with stale status.
+            runs = db.query(CampaignRun).filter(
+                CampaignRun.campaign_id == sess.campaign_id,
+                CampaignRun.status.in_(("active", "waiting")),
+            ).all()
+            for run in runs:
+                run.status = "completed"
+                run.next_run_at = None
+
             db.commit()
             task = _active_tasks.pop(session_id, None)
             if task:
