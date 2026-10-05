@@ -12,7 +12,7 @@ from app.auth import require_auth, require_ws_auth
 from app.config import settings
 from app.db import Base, SessionLocal, engine, run_migrations
 from app.models import Account
-from app.routers import accounts, auth as auth_router, campaigns, chats, contact_uploads, organize, webhook
+from app.routers import accounts, auth as auth_router, campaigns, chats, contact_uploads, ghl_webhook, organize, webhook
 from app.sync import sync_account
 from app.ws import manager
 
@@ -86,6 +86,7 @@ app.add_middleware(
 # shared-secret header auth (Make.com has no user session). Everything else requires a login.
 app.include_router(auth_router.router)
 app.include_router(webhook.router)
+app.include_router(ghl_webhook.router)
 app.include_router(accounts.router, dependencies=[Depends(require_auth)])
 app.include_router(chats.router, dependencies=[Depends(require_auth)])
 app.include_router(organize.router, dependencies=[Depends(require_auth)])

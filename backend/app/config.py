@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-jwt-secret"
     jwt_expire_days: int = 30
 
+    # GoHighLevel webhook integration
+    ghl_webhook_secret: str = ""
+    ghl_batch_wait_seconds: int = 30
+
     # extra="ignore": the shared .env also holds POSTGRES_* and NEXT_PUBLIC_* keys
     model_config = {
         "env_file": (str(_ROOT_ENV), str(_BACKEND_ENV)),
