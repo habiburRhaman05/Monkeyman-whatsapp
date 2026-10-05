@@ -9,3 +9,4 @@ aiosqlite>=0.20
 python-multipart>=0.0.9
 openpyxl>=3.1
 tzdata>=2024.1
+pyjwt>=2.8

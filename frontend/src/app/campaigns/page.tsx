@@ -6,6 +6,7 @@ import { useStore } from "@/lib/store";
 import * as api from "@/lib/api";
 import VariablePills from "@/components/VariablePills";
 import ImmediateStart from "@/components/ImmediateStart";
+import LogoutButton from "@/components/LogoutButton";
 
 function genId() {
   return Math.random().toString(36).slice(2, 8);
@@ -342,10 +343,13 @@ export default function CampaignsPage() {
           <Link href="/" className="text-sm px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25 transition-colors">← Chats</Link>
           <h1 className="text-lg font-semibold">Campaigns</h1>
         </div>
-        <button onClick={openNew} className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-          New Campaign
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={openNew} className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            New Campaign
+          </button>
+          <LogoutButton />
+        </div>
       </header>
 
       <div className="flex-1 flex min-h-0">

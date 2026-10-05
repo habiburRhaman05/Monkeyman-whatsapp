@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { refreshAccounts } from "@/lib/actions";
+import LogoutButton from "@/components/LogoutButton";
 
 /* ── Status dot ─────────────────────────────────── */
 function StatusDot({ status }: { status: string }) {
@@ -162,9 +163,12 @@ export default function AccountsPage() {
       {/* Header */}
       <header className="bg-header-bg text-header-text px-4 py-3 flex items-center justify-between">
         <h1 className="text-lg font-semibold">MonkeyMan - Campaigns</h1>
-        <Link href="/" className="text-sm px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25">
-          ← Back to chats
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/" className="text-sm px-3 py-1.5 rounded-full bg-white/15 hover:bg-white/25">
+            ← Back to chats
+          </Link>
+          <LogoutButton />
+        </div>
       </header>
 
       <div className="flex-1 p-4 max-w-2xl mx-auto w-full">

@@ -4,14 +4,15 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import evolution
+from app.auth import require_auth, require_ws_auth
 from app.config import settings
 from app.db import Base, SessionLocal, engine, run_migrations
 from app.models import Account
-from app.routers import accounts, campaigns, chats, contact_uploads, organize, webhook
+from app.routers import accounts, auth as auth_router, campaigns, chats, contact_uploads, organize, webhook
 from app.sync import sync_account
 from app.ws import manager
 
@@ -81,12 +82,15 @@ app.add_middleware(
 )
 
 # Routers
-app.include_router(accounts.router)
-app.include_router(chats.router)
-app.include_router(organize.router)
+# auth.router is public (login itself can't require a token); webhook.router has its own
+# shared-secret header auth (Make.com has no user session). Everything else requires a login.
+app.include_router(auth_router.router)
 app.include_router(webhook.router)
-app.include_router(contact_uploads.router)
-app.include_router(campaigns.router)
+app.include_router(accounts.router, dependencies=[Depends(require_auth)])
+app.include_router(chats.router, dependencies=[Depends(require_auth)])
+app.include_router(organize.router, dependencies=[Depends(require_auth)])
+app.include_router(contact_uploads.router, dependencies=[Depends(require_auth)])
+app.include_router(campaigns.router, dependencies=[Depends(require_auth)])
 
 
 @app.get("/health")
@@ -100,6 +104,9 @@ def health():
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    if not await require_ws_auth(ws):
+        await ws.close(code=4401)
+        return
     await manager.connect(ws)
     try:
         while True:

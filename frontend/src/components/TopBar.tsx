@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import { switchAccount } from "@/lib/actions";
+import LogoutButton from "./LogoutButton";
 
 export function StatusDot({ status }: { status: string }) {
   const color =
@@ -124,6 +125,7 @@ export default function TopBar() {
         <Link href="/accounts" className="text-sm px-3 py-1.5 rounded-full hover:bg-white/15 hidden sm:block">
           Manage
         </Link>
+        <LogoutButton className="hidden sm:block" />
       </div>
     </header>
   );

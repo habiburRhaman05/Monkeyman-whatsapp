@@ -13,17 +13,55 @@ export class ApiError extends Error {
   }
 }
 
+// ── Auth / session token ─────────────────────────────
+const TOKEN_KEY = "mm_token";
+
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setToken(token: string) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {}
+}
+
+export function clearToken() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {}
+}
+
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+/** On a 401, drop the stale token and send the user back to the login screen. */
+function handleAuthFailure(status: number) {
+  if (status !== 401) return;
+  clearToken();
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
+}
+
 async function request<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      headers: { "Content-Type": "application/json", ...opts.headers },
+      headers: { "Content-Type": "application/json", ...authHeaders(), ...opts.headers },
       ...opts,
     });
   } catch {
     throw new ApiError(0, "Cannot reach the server. Please try again.");
   }
   if (!res.ok) {
+    handleAuthFailure(res.status);
     let detail = res.statusText;
     try {
       const body = await res.json();
@@ -32,6 +70,19 @@ async function request<T = unknown>(path: string, opts: RequestInit = {}): Promi
     throw new ApiError(res.status, detail);
   }
   return res.json();
+}
+
+export async function login(email: string, password: string): Promise<{ token: string; email: string }> {
+  const resp = await post<{ token: string; email: string }>("/auth/login", { email, password });
+  setToken(resp.token);
+  return resp;
+}
+
+export const me = () => request<{ email: string }>("/auth/me");
+
+export function logout() {
+  clearToken();
+  if (typeof window !== "undefined") window.location.href = "/login";
 }
 
 const post = <T>(path: string, body?: unknown) =>
@@ -334,8 +385,9 @@ export interface UploadResult {
 export async function previewUpload(file: File): Promise<UploadPreview> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_BASE}/contact-uploads/preview`, { method: "POST", body: form });
+  const res = await fetch(`${API_BASE}/contact-uploads/preview`, { method: "POST", body: form, headers: authHeaders() });
   if (!res.ok) {
+    handleAuthFailure(res.status);
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body.detail || res.statusText);
   }
@@ -369,8 +421,9 @@ export async function uploadContacts(
   if (mapping.country_name) form.append("mapping_country_name", mapping.country_name);
   if (mapping.whatsapp_copy) form.append("mapping_whatsapp_copy", mapping.whatsapp_copy);
   if (defaultCountryCode) form.append("default_country_code", defaultCountryCode);
-  const res = await fetch(`${API_BASE}/contact-uploads`, { method: "POST", body: form });
+  const res = await fetch(`${API_BASE}/contact-uploads`, { method: "POST", body: form, headers: authHeaders() });
   if (!res.ok) {
+    handleAuthFailure(res.status);
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body.detail || res.statusText);
   }

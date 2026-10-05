@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Opening a chat in the dashboard tells WhatsApp the messages were read (blue ticks for the sender)
     send_read_receipts: bool = True
 
+    # Auth — single shared admin login (no self-signup). Set real values in .env, never commit them.
+    admin_email: str = "change-me@example.com"
+    admin_password: str = "change-me"
+    jwt_secret: str = "change-me-jwt-secret"
+    jwt_expire_days: int = 30
+
     # extra="ignore": the shared .env also holds POSTGRES_* and NEXT_PUBLIC_* keys
     model_config = {
         "env_file": (str(_ROOT_ENV), str(_BACKEND_ENV)),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { API_BASE } from "./api";
+import { API_BASE, getToken } from "./api";
 
 type Handler = (msg: any) => void;
 
@@ -12,9 +12,11 @@ interface Options {
 
 /** ws(s) URL of the backend socket; relative bases ("/api") resolve against the page address. */
 function wsUrl(): string {
-  if (/^https?:/.test(API_BASE)) return API_BASE.replace(/^http/, "ws") + "/ws";
-  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${window.location.host}${API_BASE}/ws`;
+  const base = /^https?:/.test(API_BASE)
+    ? API_BASE.replace(/^http/, "ws") + "/ws"
+    : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}${API_BASE}/ws`;
+  const token = getToken();
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
 /**

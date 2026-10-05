@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
 import * as api from "@/lib/api";
 import UploadContactsDialog from "@/components/UploadContactsDialog";
+import LogoutButton from "@/components/LogoutButton";
 
 export default function ContactsPage() {
   const batches = useStore((s) => s.batches);
@@ -164,6 +165,7 @@ export default function ContactsPage() {
             </svg>
             Upload
           </button>
+          <LogoutButton />
         </div>
       </header>
 
