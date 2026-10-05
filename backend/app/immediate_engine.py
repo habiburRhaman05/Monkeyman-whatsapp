@@ -243,8 +243,12 @@ async def run_immediate(session_id: int) -> None:
         })
 
         variant_counter = 0
+        skip_nodes: set[int] = set()
 
         for ni, node in enumerate(nodes):
+            if ni in skip_nodes:
+                continue
+
             # Fresh read — previous iteration may have committed from a
             # different path (wait loop, sender lanes) leaving stale cache.
             db.expire_all()
@@ -257,7 +261,168 @@ async def run_immediate(session_id: int) -> None:
 
             ntype = node.get("type")
 
-            if ntype == "message":
+            if ntype == "drip":
+                batch_size = node.get("batch_size", 5)
+                amount = node.get("amount", 1)
+                unit = node.get("unit", "minutes")
+                interval_seconds = amount * (60 if unit == "minutes" else 3600 if unit == "hours" else 86400)
+
+                # Find the next message node — drip batches its sends
+                next_msg_node = None
+                next_msg_ni = None
+                for fi in range(ni + 1, len(nodes)):
+                    if nodes[fi].get("type") == "message":
+                        next_msg_node = nodes[fi]
+                        next_msg_ni = fi
+                        break
+
+                if not next_msg_node:
+                    continue
+
+                skip_nodes.add(next_msg_ni)
+
+                # Gather active contacts across all senders
+                flat_contacts: list[tuple[int, int]] = []
+                for sa in sender_assignments:
+                    db.expire_all()
+                    for cid in sa["contact_ids"]:
+                        uc = db.get(UploadedContact, cid)
+                        if not uc:
+                            continue
+                        run = db.query(CampaignRun).filter_by(
+                            campaign_id=sess.campaign_id, phone=uc.phone
+                        ).first()
+                        if run and run.status == "replied":
+                            continue
+                        flat_contacts.append((sa["account_id"], cid))
+
+                batches = [flat_contacts[i:i + batch_size] for i in range(0, len(flat_contacts), batch_size)]
+                if not batches:
+                    continue
+
+                await _broadcast_progress(session_id, sess.campaign_id, {
+                    "kind": "node_start",
+                    "node_index": ni,
+                    "node_type": "drip",
+                    "node_id": node["id"],
+                    "total_batches": len(batches),
+                    "batch_size": batch_size,
+                    "interval_seconds": interval_seconds,
+                })
+
+                drip_total_sent = 0
+                drip_total_failed = 0
+                batches_done = 0
+
+                for bi, batch in enumerate(batches):
+                    db.expire_all()
+                    sess = db.get(ImmediateSession, session_id)
+                    if not sess or sess.status not in ("running", "paused"):
+                        break
+                    while sess and sess.status == "paused":
+                        db.close()
+                        await asyncio.sleep(2)
+                        db = SessionLocal()
+                        sess = db.get(ImmediateSession, session_id)
+                    if not sess or sess.status != "running":
+                        break
+
+                    # Group batch contacts by account
+                    by_account: dict[int, list[int]] = {}
+                    for acc_id, cid in batch:
+                        by_account.setdefault(acc_id, []).append(cid)
+
+                    tasks = []
+                    for acc_id, cids in by_account.items():
+                        tasks.append(_sender_lane(
+                            session_id=session_id,
+                            campaign_id=sess.campaign_id,
+                            account_id=acc_id,
+                            contact_ids=cids,
+                            node=next_msg_node,
+                            node_index=next_msg_ni,
+                            delay=delay,
+                            variant_counter=variant_counter,
+                        ))
+
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    batch_sent = sum(r.get("sent", 0) for r in results if isinstance(r, dict))
+                    batch_failed = sum(r.get("failed", 0) for r in results if isinstance(r, dict))
+                    drip_total_sent += batch_sent
+                    drip_total_failed += batch_failed
+                    variant_counter += len(batch)
+                    batches_done = bi + 1
+
+                    await _broadcast_progress(session_id, sess.campaign_id, {
+                        "kind": "drip_batch",
+                        "node_index": ni,
+                        "batch": bi + 1,
+                        "total_batches": len(batches),
+                        "sent": batch_sent,
+                        "failed": batch_failed,
+                    })
+
+                    # Wait the drip interval before next batch
+                    if bi < len(batches) - 1:
+                        elapsed = 0
+                        while elapsed < interval_seconds:
+                            db.expire_all()
+                            sess = db.get(ImmediateSession, session_id)
+                            if not sess or sess.status not in ("running", "paused"):
+                                break
+                            while sess and sess.status == "paused":
+                                db.close()
+                                await asyncio.sleep(2)
+                                db = SessionLocal()
+                                sess = db.get(ImmediateSession, session_id)
+                            if not sess or sess.status != "running":
+                                break
+                            chunk = min(5, interval_seconds - elapsed)
+                            await asyncio.sleep(chunk)
+                            elapsed += chunk
+
+                            if elapsed % 30 < chunk or elapsed >= interval_seconds:
+                                await _broadcast_progress(session_id, sess.campaign_id, {
+                                    "kind": "drip_wait",
+                                    "node_index": ni,
+                                    "batch": bi + 1,
+                                    "elapsed": elapsed,
+                                    "total": interval_seconds,
+                                })
+
+                progress["nodes"].append({
+                    "node_index": ni,
+                    "node_id": node["id"],
+                    "type": "drip",
+                    "batches_completed": batches_done,
+                    "total_batches": len(batches),
+                    "sent": drip_total_sent,
+                    "failed": drip_total_failed,
+                })
+                progress["nodes"].append({
+                    "node_index": next_msg_ni,
+                    "node_id": next_msg_node["id"],
+                    "type": "message",
+                    "senders": [{"sent": drip_total_sent, "failed": drip_total_failed}],
+                })
+                db.expire_all()
+                sess = db.get(ImmediateSession, session_id)
+                if sess:
+                    sess.progress = json.dumps(progress)
+                    db.commit()
+
+                await _broadcast_progress(session_id, sess.campaign_id if sess else 0, {
+                    "kind": "node_complete",
+                    "node_index": ni,
+                    "node_type": "drip",
+                    "node_id": node["id"],
+                    "sent": drip_total_sent,
+                    "failed": drip_total_failed,
+                    "batches_completed": batches_done,
+                })
+
+            elif ntype == "message":
                 await _broadcast_progress(session_id, sess.campaign_id, {
                     "kind": "node_start",
                     "node_index": ni,
