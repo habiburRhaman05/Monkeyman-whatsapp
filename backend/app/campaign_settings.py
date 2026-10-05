@@ -9,12 +9,13 @@ MIN_DELAY = 10
 MAX_DELAY = 300
 
 DEFAULTS = {
+    "mode": "immediate",  # immediate = no hours/days limits; scheduled = send window applies
     "daily_limit": 50,
     "delay_min": 10,
     "delay_max": 30,
     "start_hour": 9,
     "end_hour": 17,
-    "weekdays_only": True,
+    "days": [0, 1, 2, 3, 4],  # Mon=0 .. Sun=6
     "stop_on_reply": True,
     "timezone": "UTC",
 }
@@ -49,7 +50,12 @@ def normalize(raw: dict | str | None) -> dict:
     if end <= start:
         start, end = DEFAULTS["start_hour"], DEFAULTS["end_hour"]
     s["start_hour"], s["end_hour"] = start, end
-    s["weekdays_only"] = bool(s["weekdays_only"])
+    if isinstance(raw, dict) and "days" not in raw and "weekdays_only" in raw:
+        s["days"] = [0, 1, 2, 3, 4] if raw["weekdays_only"] else list(range(7))
+    days = sorted({d for d in (s["days"] if isinstance(s["days"], list) else []) if isinstance(d, int) and 0 <= d <= 6})
+    s["days"] = days or DEFAULTS["days"]
+    s.pop("weekdays_only", None)
+    s["mode"] = "scheduled" if s["mode"] == "scheduled" else "immediate"
     s["stop_on_reply"] = bool(s["stop_on_reply"])
     s["timezone"] = _tz(s["timezone"]).key
     return s
@@ -60,8 +66,10 @@ def local_now(settings: dict, now_utc: datetime) -> datetime:
 
 
 def in_send_window(settings: dict, now_utc: datetime) -> bool:
+    if settings["mode"] != "scheduled":
+        return True
     loc = local_now(settings, now_utc)
-    if settings["weekdays_only"] and loc.weekday() >= 5:
+    if loc.weekday() not in settings["days"]:
         return False
     return settings["start_hour"] <= loc.hour < settings["end_hour"]
 
@@ -72,7 +80,7 @@ def next_window_start(settings: dict, now_utc: datetime) -> datetime:
     day = loc.replace(hour=settings["start_hour"], minute=0, second=0, microsecond=0)
     if day <= loc:
         day += timedelta(days=1)
-    while settings["weekdays_only"] and day.weekday() >= 5:
+    while day.weekday() not in settings["days"]:
         day += timedelta(days=1)
     return day.astimezone(timezone.utc).replace(tzinfo=None)
 

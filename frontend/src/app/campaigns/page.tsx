@@ -11,10 +11,33 @@ function genId() {
   return Math.random().toString(36).slice(2, 8);
 }
 const DEFAULT_SETTINGS: api.CampaignSettings = {
-  daily_limit: 50, delay_min: 10, delay_max: 30, start_hour: 9, end_hour: 17,
-  weekdays_only: true, stop_on_reply: true, timezone: "UTC",
+  mode: "immediate", daily_limit: 50, delay_min: 10, delay_max: 30, start_hour: 9, end_hour: 17,
+  days: [0, 1, 2, 3, 4], stop_on_reply: true, timezone: "UTC",
 };
 const MAX_PER_DAY = 200;
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function HourSelect({ value, onChange, allowMidnightEnd }: { value: number; onChange: (h: number) => void; allowMidnightEnd?: boolean }) {
+  const h24 = value === 24 ? 0 : value;
+  const isPm = value !== 24 && h24 >= 12;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const build = (hour12: number, pm: boolean) => {
+    const base = hour12 % 12 + (pm ? 12 : 0);
+    return allowMidnightEnd && base === 0 ? 24 : base;
+  };
+  const cls = "px-2 py-1.5 text-sm border border-border rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30";
+  return (
+    <span className="inline-flex items-center gap-1">
+      <select className={cls} value={h12} onChange={(e) => onChange(build(Number(e.target.value), isPm))}>
+        {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => <option key={n} value={n}>{n}:00</option>)}
+      </select>
+      <select className={cls} value={isPm ? "pm" : "am"} onChange={(e) => onChange(build(h12, e.target.value === "pm"))}>
+        <option value="am">AM</option>
+        <option value="pm">PM</option>
+      </select>
+    </span>
+  );
+}
 const newMsg = (): api.CampaignNode => ({ id: genId(), type: "message", variants: [""] });
 const newWait = (): api.CampaignNode => ({ id: genId(), type: "wait", amount: 1, unit: "hours", check_reply: false });
 const newDrip = (): api.CampaignNode => ({ id: genId(), type: "drip", batch_size: 50, amount: 1, unit: "hours" });
@@ -630,15 +653,43 @@ export default function CampaignsPage() {
                             <input className={inputCls} inputMode="numeric" value={settings.delay_max} onChange={(e) => upd({ delay_max: Math.min(300, num(e.target.value)) })} onBlur={() => upd({ delay_max: Math.max(settings.delay_min, settings.delay_max) })} />
                             <span>seconds apart</span>
                           </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-4">
+                            <span className="font-medium">Mode</span>
+                            <div className="inline-flex rounded-lg border border-border overflow-hidden">
+                              {(["immediate", "scheduled"] as const).map((m) => (
+                                <button key={m} type="button" onClick={() => upd({ mode: m })}
+                                  className={`px-3 py-1.5 text-xs transition-colors ${settings.mode === m ? "bg-primary text-white font-semibold" : "bg-white text-muted hover:bg-gray-50"}`}>
+                                  {m === "immediate" ? "Immediate" : "Scheduled"}
+                                </button>
+                              ))}
+                            </div>
+                            <span className="text-xs text-muted">{settings.mode === "immediate" ? "Starts right away, any time of day. Daily limit and spacing still apply." : "Only sends in the hours and days below."}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-3"><label className="flex items-center gap-1.5"><input type="checkbox" checked={settings.stop_on_reply} onChange={(e) => upd({ stop_on_reply: e.target.checked })} /> stop the whole sequence when they reply</label></div>
+                          {settings.mode === "scheduled" && (
+                            <>
                           <div className="flex flex-wrap items-center gap-2 mt-3">
                             <span>Only between</span>
-                            <input className={inputCls} inputMode="numeric" value={settings.start_hour} onChange={(e) => upd({ start_hour: Math.min(23, num(e.target.value)) })} />
+                            <HourSelect value={settings.start_hour} onChange={(h) => upd({ start_hour: Math.min(23, h) })} />
                             <span>and</span>
-                            <input className={inputCls} inputMode="numeric" value={settings.end_hour} onChange={(e) => upd({ end_hour: Math.min(24, num(e.target.value)) })} onBlur={() => { if (settings.end_hour <= settings.start_hour) upd({ end_hour: Math.min(24, settings.start_hour + 1) }); }} />
-                            <span>o&apos;clock</span>
-                            <label className="flex items-center gap-1.5 ml-2"><input type="checkbox" checked={settings.weekdays_only} onChange={(e) => upd({ weekdays_only: e.target.checked })} /> weekdays only</label>
-                            <label className="flex items-center gap-1.5 ml-2"><input type="checkbox" checked={settings.stop_on_reply} onChange={(e) => upd({ stop_on_reply: e.target.checked })} /> stop the whole sequence when they reply</label>
+                            <HourSelect value={settings.end_hour} allowMidnightEnd onChange={(h) => upd({ end_hour: h })} />
+                            {settings.end_hour <= settings.start_hour && <span className="text-xs text-red-500">End must be after start</span>}
                           </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-3">
+                            <span>On</span>
+                            {DAY_LABELS.map((d, i) => {
+                              const on = settings.days.includes(i);
+                              return (
+                                <button key={d} type="button" onClick={() => upd({ days: on ? settings.days.filter((x) => x !== i) : [...settings.days, i].sort() })}
+                                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${on ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border text-muted hover:bg-gray-50"}`}>{d}</button>
+                              );
+                            })}
+                            <button type="button" onClick={() => upd({ days: [0, 1, 2, 3, 4] })} className="text-xs text-primary hover:underline ml-1">Weekdays</button>
+                            <button type="button" onClick={() => upd({ days: [0, 1, 2, 3, 4, 5, 6] })} className="text-xs text-primary hover:underline">Every day</button>
+                            {settings.days.length === 0 && <span className="text-xs text-red-500">Pick at least one day</span>}
+                          </div>
+                            </>
+                          )}
                           <p className="text-[11px] text-muted mt-2">Times use your timezone ({browserTz}). Hard cap: {MAX_PER_DAY} messages/day per number, minimum 10s delay, no auto-retry on failure.</p>
                           <div className="flex flex-wrap items-end gap-x-8 gap-y-2 mt-4 pt-4 border-t border-border">
                             <div><div className="text-2xl font-bold">{perDay}</div><div className="text-xs text-muted">messages a day<br />{connectedSel.length} × {settings.daily_limit}</div></div>

@@ -406,12 +406,13 @@ export interface CampaignNode {
 }
 
 export interface CampaignSettings {
+  mode: "immediate" | "scheduled";
   daily_limit: number;
   delay_min: number;
   delay_max: number;
   start_hour: number;
   end_hour: number;
-  weekdays_only: boolean;
+  days: number[];
   stop_on_reply: boolean;
   timezone: string;
 }

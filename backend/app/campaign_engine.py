@@ -92,6 +92,20 @@ async def _send_message(
         return False
 
 
+def _send_gate(cfg: dict, acc, db, now: datetime) -> datetime | None:
+    """None if this number may send right now, else when to look at the run again."""
+    if not campaign_settings.in_send_window(cfg, now):
+        return campaign_settings.next_window_start(cfg, now)
+    sent_today = db.query(CampaignEvent).filter(
+        CampaignEvent.account_id == acc.id,
+        CampaignEvent.kind == "sent",
+        CampaignEvent.at >= campaign_settings.day_start_utc(cfg, now),
+    ).count()
+    if sent_today >= min(cfg["daily_limit"], MAX_MSG_PER_DAY):
+        return now + timedelta(minutes=30)
+    return None
+
+
 def _get_contact_dict(run: CampaignRun, db) -> dict:
     """Build a template-variable dict from the run's uploaded contact (if any)."""
     if run.uploaded_contact_id:
@@ -143,17 +157,9 @@ async def _process_run(run: CampaignRun, campaign: Campaign, db) -> None:
             return
 
         cfg = campaign_settings.normalize(campaign.settings)
-        now = _utcnow()
-        if not campaign_settings.in_send_window(cfg, now):
-            run.next_run_at = campaign_settings.next_window_start(cfg, now)
-            return
-        sent_today = db.query(CampaignEvent).filter(
-            CampaignEvent.account_id == acc.id,
-            CampaignEvent.kind == "sent",
-            CampaignEvent.at >= campaign_settings.day_start_utc(cfg, now),
-        ).count()
-        if sent_today >= min(cfg["daily_limit"], MAX_MSG_PER_DAY):
-            run.next_run_at = now + timedelta(minutes=30)
+        wait_until = _send_gate(cfg, acc, db, _utcnow())
+        if wait_until:
+            run.next_run_at = wait_until
             return
 
         # Round-robin variant selection per node per account
@@ -217,6 +223,13 @@ async def _process_run(run: CampaignRun, campaign: Campaign, db) -> None:
         amount = node.get("amount", 1)
         unit = node.get("unit", "hours")
         interval = _wait_delta(amount, unit)
+
+        # Don't release contacts the message step can't send yet, or they'd pile up and burst out together
+        wait_until = _send_gate(campaign_settings.normalize(campaign.settings), acc, db, _utcnow())
+        if wait_until:
+            run.next_run_at = wait_until
+            run.status = "queued"
+            return
 
         state = db.query(CampaignNodeState).filter_by(
             campaign_id=campaign.id, node_id=node["id"], account_id=acc.id
