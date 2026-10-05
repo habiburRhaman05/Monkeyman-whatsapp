@@ -460,6 +460,9 @@ export default function CampaignsPage() {
                       {(c.status === "draft" || c.status === "paused") && c.nodes.length > 0 && (
                         <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 hover:bg-green-100">Activate</button>
                       )}
+                      {c.status === "completed" && c.nodes.length > 0 && (
+                        <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 hover:bg-green-100">Reactivate</button>
+                      )}
                       {c.status === "active" && (
                         <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-yellow-50 text-yellow-700 hover:bg-yellow-100">⏸ Pause</button>
                       )}

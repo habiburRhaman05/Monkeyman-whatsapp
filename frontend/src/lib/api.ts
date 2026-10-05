@@ -481,7 +481,7 @@ export interface CampaignCounts {
 export interface Campaign {
   id: number;
   name: string;
-  status: "draft" | "active" | "paused";
+  status: "draft" | "active" | "paused" | "completed";
   trigger_type: "manual" | "tag_added";
   trigger_label_id: number | null;
   sender_account_ids: number[];
