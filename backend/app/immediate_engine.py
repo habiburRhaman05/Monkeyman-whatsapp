@@ -241,6 +241,9 @@ async def run_immediate(session_id: int) -> None:
         variant_counter = 0
 
         for ni, node in enumerate(nodes):
+            # Fresh read — previous iteration may have committed from a
+            # different path (wait loop, sender lanes) leaving stale cache.
+            db.expire_all()
             sess = db.get(ImmediateSession, session_id)
             if not sess or sess.status not in ("running", "paused"):
                 break
@@ -260,7 +263,8 @@ async def run_immediate(session_id: int) -> None:
 
                 tasks = []
                 for sa in sender_assignments:
-                    # Filter out replied contacts before starting lane
+                    # Expire again so replied-during-wait contacts are visible
+                    db.expire_all()
                     active_contacts = []
                     for cid in sa["contact_ids"]:
                         uc = db.get(UploadedContact, cid)

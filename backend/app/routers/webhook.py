@@ -274,20 +274,46 @@ async def _handle_messages_update(instance_name: str, body: dict) -> None:
 
 def _check_campaign_reply(db, account_id: int, sender_jid: str) -> None:
     """If the sender has any active/waiting campaign runs, mark them as 'replied'."""
+    from app.models import ImmediateSession
+
     phone = sender_jid.split("@")[0].split(":")[0]
     if not phone:
         return
+
+    # Find campaigns with active immediate sessions — replies are always
+    # tracked for these regardless of campaign status or stop_on_reply.
+    immediate_campaign_ids: set[int] = set()
+    active_immediate = db.query(ImmediateSession.campaign_id).filter(
+        ImmediateSession.status.in_(("warmup", "running", "paused")),
+    ).all()
+    for row in active_immediate:
+        immediate_campaign_ids.add(row[0])
+
+    # Query by phone — for immediate mode the contact may be assigned to a
+    # different sender account than the one receiving the reply, so we cannot
+    # restrict to account_id alone.  We still prefer account_id matches, but
+    # also pick up any run for an immediate-mode campaign.
     runs = db.query(CampaignRun).filter(
-        CampaignRun.account_id == account_id,
         CampaignRun.phone == phone,
         CampaignRun.status.in_(("active", "waiting", "queued")),
     ).all()
+    # Narrow: for regular campaigns keep only runs that match the receiving account
+    runs = [
+        r for r in runs
+        if r.campaign_id in immediate_campaign_ids or r.account_id == account_id
+    ]
+    changed = False
     for run in runs:
-        camp = db.get(Campaign, run.campaign_id)
-        if not camp or camp.status != "active":
-            continue
-        if not campaign_settings.normalize(camp.settings)["stop_on_reply"]:
-            continue
+        is_immediate = run.campaign_id in immediate_campaign_ids
+
+        if not is_immediate:
+            # Regular campaign: respect campaign status and stop_on_reply
+            camp = db.get(Campaign, run.campaign_id)
+            if not camp or camp.status != "active":
+                continue
+            if not campaign_settings.normalize(camp.settings)["stop_on_reply"]:
+                continue
+
         run.status = "replied"
         run.next_run_at = None
         db.add(CampaignEvent(
@@ -299,7 +325,8 @@ def _check_campaign_reply(db, account_id: int, sender_jid: str) -> None:
             detail=f"Contact replied from {sender_jid}",
         ))
         logger.info("Campaign run %d marked as replied (phone=%s)", run.id, phone)
-    if runs:
+        changed = True
+    if changed:
         db.commit()
 
 
