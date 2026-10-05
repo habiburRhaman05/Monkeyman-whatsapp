@@ -249,15 +249,33 @@ export const useStore = create<State>((set) => ({
       }
 
       if (kind === "node_complete") {
-        const nr = {
+        const nr: any = {
           nodeIndex: data.node_index,
           nodeId: data.node_id,
           type: data.node_type,
           sent: data.sent,
           failed: data.failed,
           repliedDuringWait: data.replied_during_wait,
+          batchesCompleted: data.batches_completed,
         };
         return { immediateSession: { ...sess, nodeResults: [...sess.nodeResults, nr] } };
+      }
+
+      if (kind === "drip_batch") {
+        const results = [...sess.nodeResults];
+        const idx = results.findIndex((r) => r.nodeIndex === data.node_index);
+        const update: any = {
+          nodeIndex: data.node_index,
+          nodeId: "",
+          type: "drip",
+          sent: (idx >= 0 ? (results[idx] as any).sent || 0 : 0) + (data.sent || 0),
+          failed: (idx >= 0 ? (results[idx] as any).failed || 0 : 0) + (data.failed || 0),
+          batchesCompleted: data.batch,
+          totalBatches: data.total_batches,
+        };
+        if (idx >= 0) results[idx] = update;
+        else results.push(update);
+        return { immediateSession: { ...sess, nodeResults: results } };
       }
 
       if (kind === "wait_tick") {

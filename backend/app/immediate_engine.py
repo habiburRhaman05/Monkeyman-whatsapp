@@ -235,6 +235,7 @@ async def run_immediate(session_id: int) -> None:
 
         progress: dict = {"nodes": [], "replied_contacts": []}
         sess.status = "running"
+        campaign.status = "active"
         db.commit()
 
         await _broadcast_progress(session_id, sess.campaign_id, {
@@ -593,6 +594,11 @@ async def run_immediate(session_id: int) -> None:
             sess.status = "completed"
             sess.finished_at = _utcnow()
             sess.progress = json.dumps(progress)
+
+            # Update the campaign status itself
+            campaign = db.get(Campaign, sess.campaign_id)
+            if campaign:
+                campaign.status = "completed"
 
             # Mark remaining active runs as completed
             runs = db.query(CampaignRun).filter(

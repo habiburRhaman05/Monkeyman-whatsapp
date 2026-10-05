@@ -1095,6 +1095,7 @@ export default function CampaignsPage() {
               setShowImmediate(false);
               setRecoveredSessionId(undefined);
               setRecoveredStatus(undefined);
+              load();
             }}
             recoveredSessionId={recoveredSessionId}
             recoveredStatus={recoveredStatus}

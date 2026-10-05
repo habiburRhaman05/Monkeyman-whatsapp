@@ -80,12 +80,14 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
         }));
 
       // Build node results from server progress
-      const nodeResults = resp.progress?.nodes.map((n) => ({
+      const nodeResults = resp.progress?.nodes.map((n: any) => ({
         nodeIndex: n.node_index,
         nodeId: n.node_id,
         type: n.type,
-        sent: n.senders?.reduce((s, x) => s + (x.sent || 0), 0),
-        failed: n.senders?.reduce((s, x) => s + (x.failed || 0), 0),
+        sent: n.type === "drip" ? (n.sent ?? 0) : n.senders?.reduce((s: number, x: any) => s + (x.sent || 0), 0),
+        failed: n.type === "drip" ? (n.failed ?? 0) : n.senders?.reduce((s: number, x: any) => s + (x.failed || 0), 0),
+        batchesCompleted: n.batches_completed,
+        totalBatches: n.total_batches,
         repliedDuringWait: n.replied_during_wait,
         waitSeconds: n.wait_seconds,
       })) || [];
@@ -509,7 +511,7 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
               {campaign.nodes.map((node, ni) => {
                 const result = sess.nodeResults.find((r) => r.nodeIndex === ni);
                 const isCurrent = sess.currentNodeIndex === ni;
-                const isComplete = !!result && result.type === "message";
+                const isComplete = !!result && (result.type === "message" || result.type === "drip");
                 const isWaiting = result?.type === "wait" && result.elapsed !== undefined && result.elapsed < (result.waitSeconds ?? 0);
 
                 return (
@@ -520,9 +522,9 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
                       ) : ni + 1}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium capitalize">{node.type} {node.type === "wait" ? `(${node.amount} ${node.unit})` : ""}</div>
-                      {result && node.type === "message" && (
-                        <div className="text-xs text-muted">{result.sent ?? 0} sent / {result.failed ?? 0} failed</div>
+                      <div className="text-sm font-medium capitalize">{node.type === "drip" ? `Drip (${node.batch_size ?? 5}/${node.amount ?? 1} ${node.unit ?? "min"})` : node.type} {node.type === "wait" ? `(${node.amount} ${node.unit})` : ""}</div>
+                      {result && (node.type === "message" || node.type === "drip") && (
+                        <div className="text-xs text-muted">{result.sent ?? 0} sent / {result.failed ?? 0} failed{result.type === "drip" && (result as any).batchesCompleted ? ` · ${(result as any).batchesCompleted}/${(result as any).totalBatches} batches` : ""}</div>
                       )}
                       {isWaiting && (
                         <div className="text-xs text-amber-600">
@@ -606,8 +608,8 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
                   </div>
                   <div className="flex-1">
                     <div className="text-sm font-medium capitalize">{nr.type}</div>
-                    {nr.type === "message" && (
-                      <div className="text-xs text-muted">{nr.sent ?? 0} sent / {nr.failed ?? 0} failed</div>
+                    {(nr.type === "message" || nr.type === "drip") && (
+                      <div className="text-xs text-muted">{nr.sent ?? 0} sent / {nr.failed ?? 0} failed{nr.type === "drip" && (nr as any).batchesCompleted ? ` · ${(nr as any).batchesCompleted}/${(nr as any).totalBatches} batches` : ""}</div>
                     )}
                     {nr.type === "wait" && nr.repliedDuringWait !== undefined && (
                       <div className="text-xs text-muted">{nr.repliedDuringWait} replied during wait</div>
