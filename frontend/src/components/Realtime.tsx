@@ -154,7 +154,43 @@ export default function Realtime() {
       },
 
       "immediate.progress": (msg) => {
-        useStore.getState().updateImmediateProgress(msg.data);
+        const s = useStore.getState();
+        const sessionId: number | undefined = msg.session_id;
+        const campaignId: number | undefined = msg.campaign_id;
+        const data = msg.data;
+
+        // Auto-initialize session for GHL-triggered (or any external) launches
+        if (!s.immediateSession && sessionId && campaignId) {
+          s.setImmediateSession({
+            sessionId,
+            campaignId,
+            status: "running",
+            currentNodeIndex: 0,
+            nodeResults: [],
+            contactEvents: [],
+          });
+        }
+
+        // If a different session started, switch to tracking it
+        if (s.immediateSession && sessionId && s.immediateSession.sessionId !== sessionId) {
+          s.setImmediateSession({
+            sessionId,
+            campaignId: campaignId ?? 0,
+            status: "running",
+            currentNodeIndex: 0,
+            nodeResults: [],
+            contactEvents: [],
+          });
+        }
+
+        s.updateImmediateProgress(data);
+
+        // Refresh campaign list on start/complete so sidebar shows updated status
+        if (data.kind === "started" || data.kind === "completed" || data.kind === "error") {
+          import("@/lib/api").then((api) => {
+            api.listCampaigns().then((c) => s.setCampaigns(c)).catch(() => {});
+          });
+        }
       },
 
       "sync.done": (msg) => {

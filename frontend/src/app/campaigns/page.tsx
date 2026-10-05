@@ -131,6 +131,7 @@ export default function CampaignsPage() {
   const campaigns = useStore((s) => s.campaigns);
   const accounts = useStore((s) => s.accounts);
   const labels = useStore((s) => s.labels);
+  const immediateSession = useStore((s) => s.immediateSession);
 
   const [loading, setLoading] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -198,6 +199,47 @@ export default function CampaignsPage() {
       })
       .catch(() => {});
   }, [load, labels.length]);
+
+  // Poll campaign list every 5s so GHL-triggered status changes appear
+  useEffect(() => {
+    const iv = setInterval(() => {
+      api.listCampaigns().then((c) => useStore.getState().setCampaigns(c)).catch(() => {});
+    }, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Auto-open progress dialog when a GHL-triggered session is detected via WebSocket
+  const autoOpenedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!immediateSession || showImmediate) return;
+    if (autoOpenedRef.current === immediateSession.sessionId) return;
+    const campId = immediateSession.campaignId;
+    if (immediateSession.status !== "running" && immediateSession.status !== "warmup") return;
+
+    autoOpenedRef.current = immediateSession.sessionId;
+
+    if (editId === campId) {
+      setRecoveredSessionId(immediateSession.sessionId);
+      setRecoveredStatus(immediateSession.status);
+      setShowImmediate(true);
+    } else {
+      setCreating(false);
+      setError("");
+      setSelectedNode(null);
+      api.getCampaign(campId).then((c) => {
+        setEditId(c.id);
+        setName(c.name);
+        setTriggerType(c.trigger_type);
+        setTriggerLabelId(c.trigger_label_id);
+        setSenderIds(c.sender_account_ids);
+        setSettings({ ...c.settings, timezone: browserTz });
+        setNodes(c.nodes.length > 0 ? c.nodes : [newMsg()]);
+        setRecoveredSessionId(immediateSession.sessionId);
+        setRecoveredStatus(immediateSession.status);
+        setShowImmediate(true);
+      }).catch(() => {});
+    }
+  }, [immediateSession?.sessionId]);
 
   useEffect(() => {
     if (!editorOpen) return;
@@ -374,19 +416,39 @@ export default function CampaignsPage() {
             ) : (
               campaigns.map((c) => {
                 const msgCount = c.nodes.filter((n) => n.type === "message").length;
+                const hasActiveSession = immediateSession && immediateSession.campaignId === c.id &&
+                  (immediateSession.status === "running" || immediateSession.status === "warmup" || immediateSession.status === "paused");
                 return (
                   <div key={c.id} onClick={() => openEdit(c.id)}
                     className={`group border-b border-border/60 hover:bg-gray-50 px-4 py-3 cursor-pointer transition-colors ${editId === c.id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="font-medium text-sm truncate">{c.name}</span>
-                      <StatusBadge status={c.status} />
+                      <span className="font-medium text-sm truncate flex items-center gap-1.5">
+                        {hasActiveSession && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />}
+                        {c.name}
+                      </span>
+                      {hasActiveSession ? (
+                        <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 flex items-center gap-1">
+                          Sending
+                        </span>
+                      ) : (
+                        <StatusBadge status={c.status} />
+                      )}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted">
                       <span>{msgCount} msg · {c.nodes.length} steps</span>
                       <span>{c.trigger_type === "tag_added" ? "Tag trigger" : "Manual"}</span>
                     </div>
-                    {c.counts && c.counts.total > 0 && (
+                    {hasActiveSession && immediateSession && (
+                      <div className="flex gap-2 mt-1 text-xs">
+                        <span className="text-green-600">{immediateSession.contactEvents.filter((e) => e.status === "sent").length} sent</span>
+                        {immediateSession.contactEvents.filter((e) => e.status === "failed").length > 0 && (
+                          <span className="text-red-500">{immediateSession.contactEvents.filter((e) => e.status === "failed").length} failed</span>
+                        )}
+                        <span className="text-muted">step {immediateSession.currentNodeIndex + 1}/{c.nodes.length}</span>
+                      </div>
+                    )}
+                    {!hasActiveSession && c.counts && c.counts.total > 0 && (
                       <div className="flex gap-2 mt-1 text-xs">
                         {c.counts.active > 0 && <span className="text-blue-600">{c.counts.active} active</span>}
                         <span className="text-green-600">{c.counts.completed} done</span>
