@@ -63,12 +63,15 @@ async def _reapply_webhooks_and_sync() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     from app.campaign_engine import campaign_loop
+    from app.tag_watch_engine import tag_watch_loop
 
     webhook_task = asyncio.create_task(_reapply_webhooks_and_sync())
     campaign_task = asyncio.create_task(campaign_loop())
+    tag_watch_task = asyncio.create_task(tag_watch_loop())
     yield
     webhook_task.cancel()
     campaign_task.cancel()
+    tag_watch_task.cancel()
 
 
 app = FastAPI(title="WhatsApp Dashboard", version="0.1.0", lifespan=lifespan)

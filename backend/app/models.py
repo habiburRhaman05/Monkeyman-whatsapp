@@ -180,6 +180,10 @@ class Campaign(Base):
     sender_account_ids: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of account IDs
     nodes: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of node dicts
     settings: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON sending limits
+    # Tag-watch: last uploaded_contact id we scanned up to (cursor)
+    tag_cursor: Mapped[int] = mapped_column(Integer, default=0)
+    # Tag-watch: last time the tag watcher processed contacts
+    tag_last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 

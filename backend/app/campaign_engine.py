@@ -329,9 +329,12 @@ async def _tick() -> None:
 
 
 def _auto_complete_campaigns(db) -> None:
-    """Set active campaigns to 'completed' when all their runs are finished."""
+    """Set active campaigns to 'completed' when all their runs are finished.
+    Skip tag_added campaigns — they keep watching for new contacts."""
     active_campaigns = db.query(Campaign).filter(Campaign.status == "active").all()
     for camp in active_campaigns:
+        if camp.trigger_type == "tag_added":
+            continue
         total = db.query(CampaignRun).filter(CampaignRun.campaign_id == camp.id).count()
         if total == 0:
             continue

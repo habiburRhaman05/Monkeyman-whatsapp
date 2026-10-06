@@ -490,6 +490,24 @@ export interface Campaign {
   created_at: string | null;
   updated_at: string | null;
   counts?: CampaignCounts;
+  tag_cursor?: number;
+  tag_last_checked_at?: string | null;
+}
+
+export interface TagStats {
+  campaign_id: number;
+  status: string;
+  trigger_type: string;
+  tag_cursor: number;
+  tag_last_checked_at: string | null;
+  total_contacts: number;
+  total_enrolled: number;
+  active_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  total_sent: number;
+  has_active_session: boolean;
+  session_status: string | null;
 }
 
 export interface CampaignRun {
@@ -625,3 +643,6 @@ export interface ImmediateActiveResponse {
 
 export const immediateActive = (campaignId: number) =>
   request<ImmediateActiveResponse>(`/campaigns/${campaignId}/immediate-active`);
+
+export const campaignTagStats = (campaignId: number) =>
+  request<TagStats>(`/campaigns/${campaignId}/tag-stats`);

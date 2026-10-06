@@ -51,7 +51,11 @@ def run_migrations() -> None:
             ("muted", "BOOLEAN DEFAULT FALSE"),
         ],
         "contacts": [("profile_pic_url", "VARCHAR(500)")],
-        "campaigns": [("settings", "TEXT")],
+        "campaigns": [
+            ("settings", "TEXT"),
+            ("tag_cursor", "INTEGER DEFAULT 0"),
+            ("tag_last_checked_at", "DATETIME"),
+        ],
         "uploaded_contacts": [
             ("first_name", "VARCHAR(100)"),
             ("last_name", "VARCHAR(100)"),

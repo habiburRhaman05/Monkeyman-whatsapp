@@ -96,6 +96,9 @@ def campaign_out(c: Campaign, db: Session | None = None) -> dict:
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
+    if c.trigger_type == "tag_added":
+        d["tag_cursor"] = c.tag_cursor or 0
+        d["tag_last_checked_at"] = c.tag_last_checked_at.isoformat() if c.tag_last_checked_at else None
     if db:
         total = db.query(CampaignRun).filter(CampaignRun.campaign_id == c.id).count()
         active = db.query(CampaignRun).filter(CampaignRun.campaign_id == c.id, CampaignRun.status.in_(("active", "waiting", "queued"))).count()
@@ -253,6 +256,47 @@ def campaign_stats(campaign_id: int, db: Session = Depends(get_db)):
         "by_account": by_account,
         "total_sent": sent_events,
         "total_runs": len(runs),
+    }
+
+
+@router.get("/{campaign_id}/tag-stats")
+def tag_stats(campaign_id: int, db: Session = Depends(get_db)):
+    c = db.get(Campaign, campaign_id)
+    if not c:
+        raise HTTPException(404, "Campaign not found")
+
+    total_contacts = 0
+    if c.trigger_label_id:
+        from app.models import ContactBatch
+        batch_ids = [b.id for b in db.query(ContactBatch.id).filter(ContactBatch.label_id == c.trigger_label_id).all()]
+        if batch_ids:
+            total_contacts = db.query(UploadedContact).filter(UploadedContact.batch_id.in_(batch_ids)).count()
+
+    total_runs = db.query(CampaignRun).filter(CampaignRun.campaign_id == c.id).count()
+    active_runs = db.query(CampaignRun).filter(CampaignRun.campaign_id == c.id, CampaignRun.status.in_(("active", "waiting", "queued"))).count()
+    completed_runs = db.query(CampaignRun).filter(CampaignRun.campaign_id == c.id, CampaignRun.status == "completed").count()
+    failed_runs = db.query(CampaignRun).filter(CampaignRun.campaign_id == c.id, CampaignRun.status == "failed").count()
+    sent_events = db.query(CampaignEvent).filter(CampaignEvent.campaign_id == c.id, CampaignEvent.kind == "sent").count()
+
+    active_session = db.query(ImmediateSession).filter(
+        ImmediateSession.campaign_id == c.id,
+        ImmediateSession.status.in_(("warmup", "running", "paused")),
+    ).first()
+
+    return {
+        "campaign_id": c.id,
+        "status": c.status,
+        "trigger_type": c.trigger_type,
+        "tag_cursor": c.tag_cursor or 0,
+        "tag_last_checked_at": c.tag_last_checked_at.isoformat() if c.tag_last_checked_at else None,
+        "total_contacts": total_contacts,
+        "total_enrolled": total_runs,
+        "active_runs": active_runs,
+        "completed_runs": completed_runs,
+        "failed_runs": failed_runs,
+        "total_sent": sent_events,
+        "has_active_session": active_session is not None,
+        "session_status": active_session.status if active_session else None,
     }
 
 

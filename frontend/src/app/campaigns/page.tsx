@@ -170,6 +170,9 @@ export default function CampaignsPage() {
   const [recoveredSessionId, setRecoveredSessionId] = useState<number | undefined>();
   const [recoveredStatus, setRecoveredStatus] = useState<string | undefined>();
 
+  // Tag campaign stats
+  const [tagStats, setTagStats] = useState<api.TagStats | null>(null);
+
   // Template variables
   const BUILTIN_FIELDS = ["first_name", "name", "company", "email", "phone", "whatsapp_copy"];
   const [contactFields, setContactFields] = useState<string[]>(BUILTIN_FIELDS);
@@ -241,6 +244,19 @@ export default function CampaignsPage() {
     }
   }, [immediateSession?.sessionId]);
 
+  // Poll tag stats when editing an active tag_added campaign
+  useEffect(() => {
+    if (!editId || triggerType !== "tag_added") { setTagStats(null); return; }
+    const camp = campaigns.find((c) => c.id === editId);
+    if (!camp || camp.trigger_type !== "tag_added") { setTagStats(null); return; }
+    api.campaignTagStats(editId).then(setTagStats).catch(() => {});
+    if (camp.status !== "active") return;
+    const iv = setInterval(() => {
+      api.campaignTagStats(editId).then(setTagStats).catch(() => {});
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [editId, triggerType, campaigns]);
+
   useEffect(() => {
     if (!editorOpen) return;
     api.getSenderUsage(browserTz).then((r) => setUsage(r.usage)).catch(() => {});
@@ -301,6 +317,7 @@ export default function CampaignsPage() {
     setName("New Campaign"); setTriggerType("manual"); setTriggerLabelId(null);
     setSenderIds([]); setSettings({ ...DEFAULT_SETTINGS, timezone: browserTz }); setNodes([newMsg()]); setError(""); setSelectedNode(null);
     setEditorTab("builder"); setEnrollResult(null); setRuns([]); setExpandedRun(null);
+    setTagStats(null);
   }
   function openNew() { resetEditor(); setEditId(null); setCreating(true); }
   async function openEdit(id: number) {
@@ -418,18 +435,23 @@ export default function CampaignsPage() {
                 const msgCount = c.nodes.filter((n) => n.type === "message").length;
                 const hasActiveSession = immediateSession && immediateSession.campaignId === c.id &&
                   (immediateSession.status === "running" || immediateSession.status === "warmup" || immediateSession.status === "paused");
+                const isTagWatching = c.trigger_type === "tag_added" && c.status === "active";
                 return (
                   <div key={c.id} onClick={() => openEdit(c.id)}
                     className={`group border-b border-border/60 hover:bg-gray-50 px-4 py-3 cursor-pointer transition-colors ${editId === c.id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="font-medium text-sm truncate flex items-center gap-1.5">
-                        {hasActiveSession && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />}
+                        {(hasActiveSession || isTagWatching) && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />}
                         {c.name}
                       </span>
                       {hasActiveSession ? (
                         <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 flex items-center gap-1">
                           Sending
+                        </span>
+                      ) : isTagWatching ? (
+                        <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-emerald-100 text-emerald-700 flex items-center gap-1">
+                          Watching
                         </span>
                       ) : (
                         <StatusBadge status={c.status} />
@@ -448,7 +470,14 @@ export default function CampaignsPage() {
                         <span className="text-muted">step {immediateSession.currentNodeIndex + 1}/{c.nodes.length}</span>
                       </div>
                     )}
-                    {!hasActiveSession && c.counts && c.counts.total > 0 && (
+                    {!hasActiveSession && isTagWatching && c.counts && (
+                      <div className="flex gap-2 mt-1 text-xs">
+                        <span className="text-emerald-600">{c.counts.total} enrolled</span>
+                        <span className="text-green-600">{c.counts.completed} done</span>
+                        {c.counts.failed > 0 && <span className="text-red-500">{c.counts.failed} failed</span>}
+                      </div>
+                    )}
+                    {!hasActiveSession && !isTagWatching && c.counts && c.counts.total > 0 && (
                       <div className="flex gap-2 mt-1 text-xs">
                         {c.counts.active > 0 && <span className="text-blue-600">{c.counts.active} active</span>}
                         <span className="text-green-600">{c.counts.completed} done</span>
@@ -458,13 +487,19 @@ export default function CampaignsPage() {
                     )}
                     <div className="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       {(c.status === "draft" || c.status === "paused") && c.nodes.length > 0 && (
-                        <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 hover:bg-green-100">Activate</button>
+                        <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 hover:bg-green-100">
+                          {c.trigger_type === "tag_added" ? "Start Watching" : "Activate"}
+                        </button>
                       )}
                       {c.status === "completed" && c.nodes.length > 0 && (
-                        <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 hover:bg-green-100">Reactivate</button>
+                        <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 hover:bg-green-100">
+                          {c.trigger_type === "tag_added" ? "Start Watching" : "Reactivate"}
+                        </button>
                       )}
                       {c.status === "active" && (
-                        <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-yellow-50 text-yellow-700 hover:bg-yellow-100">⏸ Pause</button>
+                        <button onClick={(e) => { e.stopPropagation(); toggleStatus(c); }} className="px-2 py-1 text-xs rounded bg-yellow-50 text-yellow-700 hover:bg-yellow-100">
+                          {c.trigger_type === "tag_added" ? "Stop Watching" : "Pause"}
+                        </button>
                       )}
                       <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} className="px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100">Delete</button>
                     </div>
@@ -508,12 +543,30 @@ export default function CampaignsPage() {
                   <button onClick={handleSave} disabled={saving || !name.trim()} className="px-4 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50 font-medium transition-colors">
                     {saving ? "Saving…" : editId ? "Save" : "Create"}
                   </button>
-                  {editId && nodes.length > 0 && (
+                  {editId && nodes.length > 0 && triggerType !== "tag_added" && (
                     <button onClick={() => setShowImmediate(true)} className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors flex items-center gap-1.5">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
                       Immediate Start
                     </button>
                   )}
+                  {editId && nodes.length > 0 && triggerType === "tag_added" && (() => {
+                    const camp = campaigns.find((c) => c.id === editId);
+                    if (!camp) return null;
+                    if (camp.status === "active") {
+                      return (
+                        <button onClick={() => toggleStatus(camp)} className="px-4 py-1.5 text-sm bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-medium transition-colors flex items-center gap-1.5">
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+                          Stop Watching
+                        </button>
+                      );
+                    }
+                    return (
+                      <button onClick={() => toggleStatus(camp)} className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium transition-colors flex items-center gap-1.5">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="3" /></svg>
+                        Start Watching
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -570,6 +623,63 @@ export default function CampaignsPage() {
                         )}
                       </div>
                     </div>
+
+                    {/* ── Tag campaign live status ────────── */}
+                    {triggerType === "tag_added" && tagStats && editId && (() => {
+                      const camp = campaigns.find((c) => c.id === editId);
+                      const isActive = camp?.status === "active";
+                      return (
+                        <div className={`mb-6 rounded-xl border p-4 shadow-sm ${isActive ? "bg-emerald-50 border-emerald-200" : "bg-white border-border"}`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-semibold text-sm flex items-center gap-2">
+                              {isActive && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
+                              {isActive ? "Tag Watch Active" : "Tag Watch Status"}
+                            </h3>
+                            {tagStats.tag_last_checked_at && (
+                              <span className="text-[10px] text-muted">
+                                Last checked: {new Date(tagStats.tag_last_checked_at).toLocaleTimeString()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="bg-white rounded-lg p-2.5 border border-border/60">
+                              <div className="text-xl font-bold text-gray-900">{tagStats.total_contacts}</div>
+                              <div className="text-[10px] text-muted uppercase tracking-wider">Total Contacts</div>
+                            </div>
+                            <div className="bg-white rounded-lg p-2.5 border border-border/60">
+                              <div className="text-xl font-bold text-blue-600">{tagStats.total_enrolled}</div>
+                              <div className="text-[10px] text-muted uppercase tracking-wider">Enrolled</div>
+                            </div>
+                            <div className="bg-white rounded-lg p-2.5 border border-border/60">
+                              <div className="text-xl font-bold text-green-600">{tagStats.total_sent}</div>
+                              <div className="text-[10px] text-muted uppercase tracking-wider">Messages Sent</div>
+                            </div>
+                            <div className="bg-white rounded-lg p-2.5 border border-border/60">
+                              <div className="text-xl font-bold text-emerald-600">{tagStats.completed_runs}</div>
+                              <div className="text-[10px] text-muted uppercase tracking-wider">Completed</div>
+                            </div>
+                          </div>
+                          {(tagStats.active_runs > 0 || tagStats.failed_runs > 0) && (
+                            <div className="flex gap-3 mt-2">
+                              {tagStats.active_runs > 0 && (
+                                <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">{tagStats.active_runs} in progress</span>
+                              )}
+                              {tagStats.failed_runs > 0 && (
+                                <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded-full">{tagStats.failed_runs} failed</span>
+                              )}
+                              {tagStats.has_active_session && (
+                                <span className="text-xs text-green-700 bg-green-100 px-2 py-1 rounded-full">Sending now</span>
+                              )}
+                            </div>
+                          )}
+                          {isActive && (
+                            <p className="text-[11px] text-emerald-700 mt-2">
+                              Watching for new contacts every 15 seconds. New contacts are auto-enrolled and messaged.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* ── Visual workflow ────────────────── */}
 
