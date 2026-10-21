@@ -195,8 +195,19 @@ def delete_campaign(campaign_id: int, db: Session = Depends(get_db)):
     c = db.get(Campaign, campaign_id)
     if not c:
         raise HTTPException(404, "Campaign not found")
+
+    active_sess = db.query(ImmediateSession).filter(
+        ImmediateSession.campaign_id == c.id,
+        ImmediateSession.status.in_(("warmup", "running", "paused")),
+    ).first()
+    if active_sess:
+        from app.immediate_engine import stop_immediate
+        stop_immediate(active_sess.id)
+
     db.query(CampaignEvent).filter(CampaignEvent.campaign_id == c.id).delete()
     db.query(CampaignNodeState).filter(CampaignNodeState.campaign_id == c.id).delete()
+    db.query(CampaignRun).filter(CampaignRun.campaign_id == c.id).delete()
+    db.query(ImmediateSession).filter(ImmediateSession.campaign_id == c.id).delete()
     db.delete(c)
     db.commit()
     return {"ok": True}
@@ -739,6 +750,7 @@ def immediate_progress(campaign_id: int, session_id: int, db: Session = Depends(
     progress = {"nodes": progress_nodes, "replied_contacts": []}
 
     contact_statuses = []
+    cur_ni = sess.current_node_index if sess.current_node_index is not None else 0
     for cid in all_contact_ids:
         uc = contacts_by_id.get(cid)
         if not uc:
@@ -751,10 +763,10 @@ def immediate_progress(campaign_id: int, session_id: int, db: Session = Depends(
             node_index = latest["node_index"]
         elif run and run.status == "replied":
             status = "skipped"
-            node_index = sess.current_node_index
+            node_index = cur_ni
         else:
             status = "pending"
-            node_index = sess.current_node_index
+            node_index = cur_ni
         contact_statuses.append({
             "contact_id": cid,
             "phone": uc.phone,

@@ -56,9 +56,18 @@ def _record_event(db, run: CampaignRun, node_id: str, kind: str, detail: str | N
 
 
 def _run_for(db, campaign_id: int, uc: UploadedContact, account_id: int) -> CampaignRun:
-    """The campaign run for this contact, created on demand."""
+    """The campaign run for this contact, created on demand.
+
+    If a previous run exists and is completed, reset it to active so the
+    contact can be re-processed on a campaign reactivation.
+    """
     run = db.query(CampaignRun).filter_by(campaign_id=campaign_id, phone=uc.phone).first()
     if run:
+        if run.status == "completed":
+            run.status = "active"
+            run.node_id = None
+            run.next_run_at = None
+            db.flush()
         return run
     run = CampaignRun(
         campaign_id=campaign_id,
@@ -175,7 +184,7 @@ async def _fail_contacts(
         if not uc:
             continue
         run = _run_for(db, campaign_id, uc, account_id)
-        if run.status == "replied":
+        if run.status in ("replied", "failed", "stopped", "skipped"):
             continue
         run.status = "failed"
         run.node_id = node["id"]
@@ -249,9 +258,10 @@ async def _sender_lane(
 
                 run = _run_for(db, campaign_id, uc, account_id)
 
-                if run.status == "replied":
-                    _record_event(db, run, node["id"], "skipped", "replied", None)
-                    db.commit()
+                if run.status in ("replied", "failed", "stopped", "skipped"):
+                    if run.status == "replied":
+                        _record_event(db, run, node["id"], "skipped", "replied", None)
+                        db.commit()
                     await _broadcast_progress(session_id, campaign_id, {
                         "kind": "contact_skipped",
                         "node_index": node_index,
@@ -259,7 +269,7 @@ async def _sender_lane(
                         "contact_id": cid,
                         "phone": uc.phone,
                         "name": uc.name or uc.phone,
-                        "reason": "replied",
+                        "reason": run.status,
                     })
                     continue
 
@@ -439,7 +449,7 @@ async def run_immediate(session_id: int) -> None:
                         run = db.query(CampaignRun).filter_by(
                             campaign_id=sess.campaign_id, phone=uc.phone
                         ).first()
-                        if run and run.status == "replied":
+                        if run and run.status in ("replied", "failed", "stopped", "skipped"):
                             continue
                         flat_contacts.append((sa["account_id"], cid))
 
@@ -581,7 +591,7 @@ async def run_immediate(session_id: int) -> None:
 
                 tasks = []
                 for sa in sender_assignments:
-                    # Expire again so replied-during-wait contacts are visible
+                    # Expire again so replied/failed contacts are visible
                     db.expire_all()
                     active_contacts = []
                     for cid in sa["contact_ids"]:
@@ -591,7 +601,7 @@ async def run_immediate(session_id: int) -> None:
                         run = db.query(CampaignRun).filter_by(
                             campaign_id=sess.campaign_id, phone=uc.phone
                         ).first()
-                        if run and run.status == "replied":
+                        if run and run.status in ("replied", "failed", "stopped", "skipped"):
                             continue
                         active_contacts.append(cid)
 
@@ -856,14 +866,16 @@ def stop_immediate(session_id: int) -> bool:
             sess.status = "completed"
             sess.finished_at = _utcnow()
 
-            # Mark remaining active/waiting runs as completed so they don't
-            # linger in the database with stale status.
+            campaign = db.get(Campaign, sess.campaign_id)
+            if campaign and campaign.status == "active":
+                campaign.status = "paused"
+
             runs = db.query(CampaignRun).filter(
                 CampaignRun.campaign_id == sess.campaign_id,
                 CampaignRun.status.in_(("active", "waiting")),
             ).all()
             for run in runs:
-                run.status = "completed"
+                run.status = "stopped"
                 run.next_run_at = None
 
             db.commit()

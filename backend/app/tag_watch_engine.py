@@ -75,7 +75,6 @@ def _enroll_contacts(
     existing_phones = set(
         r.phone for r in db.query(CampaignRun.phone).filter(
             CampaignRun.campaign_id == campaign.id,
-            CampaignRun.status.in_(("active", "waiting", "queued")),
         ).all()
     )
 
