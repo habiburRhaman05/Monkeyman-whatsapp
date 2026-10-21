@@ -258,7 +258,9 @@ export const useStore = create<State>((set) => ({
           repliedDuringWait: data.replied_during_wait,
           batchesCompleted: data.batches_completed,
         };
-        return { immediateSession: { ...sess, nodeResults: [...sess.nodeResults, nr] } };
+        // Replace, so a polled result and the websocket event cannot both appear
+        const results = sess.nodeResults.filter((r) => r.nodeIndex !== data.node_index);
+        return { immediateSession: { ...sess, nodeResults: [...results, nr] } };
       }
 
       if (kind === "drip_batch") {

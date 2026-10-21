@@ -600,7 +600,11 @@ export interface ImmediateProgressResponse {
       node_index: number;
       node_id: string;
       type: string;
-      senders?: Array<{ sent: number; failed: number; account_id: number }>;
+      sent?: number;
+      failed?: number;
+      senders?: Array<{ sent: number; failed: number; account_id?: number }>;
+      batches_completed?: number;
+      total_batches?: number;
       wait_seconds?: number;
       replied_during_wait?: number;
     }>;
@@ -611,7 +615,9 @@ export interface ImmediateProgressResponse {
     phone: string;
     name: string;
     status: string;
+    node_index: number;
     node_id: string | null;
+    history?: Array<{ node_index: number; status: string }>;
   }>;
   started_at: string | null;
   finished_at: string | null;

@@ -21,10 +21,94 @@ from app.ws import manager
 logger = logging.getLogger(__name__)
 
 _active_tasks: dict[int, asyncio.Task] = {}
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+WATCHDOG_INTERVAL = 10  # seconds between stuck-session checks
+WARMUP_GRACE = 45  # seconds a session may sit in "warmup" before we start it ourselves
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Remember the app's event loop so sync endpoints can spawn background work."""
+    global _main_loop
+    _main_loop = loop
+
+
+def has_active_task(session_id: int) -> bool:
+    task = _active_tasks.get(session_id)
+    return task is not None and not task.done()
+
+
+def _record_event(db, run: CampaignRun, node_id: str, kind: str, detail: str | None = None,
+                  variant_index: int | None = None) -> None:
+    db.add(CampaignEvent(
+        run_id=run.id,
+        campaign_id=run.campaign_id,
+        account_id=run.account_id,
+        node_id=node_id,
+        kind=kind,
+        variant_index=variant_index,
+        detail=(detail or "")[:500] or None,
+    ))
+
+
+def _run_for(db, campaign_id: int, uc: UploadedContact, account_id: int) -> CampaignRun:
+    """The campaign run for this contact, created on demand."""
+    run = db.query(CampaignRun).filter_by(campaign_id=campaign_id, phone=uc.phone).first()
+    if run:
+        return run
+    run = CampaignRun(
+        campaign_id=campaign_id,
+        account_id=account_id,
+        phone=uc.phone,
+        jid=uc.wa_jid or (uc.phone + "@s.whatsapp.net"),
+        uploaded_contact_id=uc.id,
+        status="active",
+    )
+    db.add(run)
+    db.flush()
+    return run
+
+
+def _already_sent(db, run: CampaignRun, node_id: str, since: datetime | None = None) -> bool:
+    """Has this run already received this step during the current session?"""
+    query = db.query(CampaignEvent.id).filter(
+        CampaignEvent.run_id == run.id,
+        CampaignEvent.node_id == node_id,
+        CampaignEvent.kind == "sent",
+    )
+    if since is not None:
+        query = query.filter(CampaignEvent.at >= since)
+    return query.first() is not None
+
+
+def _set_node_result(progress: dict, entry: dict) -> None:
+    """Replace (or add) the result for one node instead of appending duplicates."""
+    nodes = progress.setdefault("nodes", [])
+    for i, existing in enumerate(nodes):
+        if existing.get("node_index") == entry.get("node_index"):
+            nodes[i] = entry
+            return
+    nodes.append(entry)
+
+
+async def _wait_for_running(session_id: int, db):
+    """Wait out a pause. Returns (db, session); session is None when it was deleted.
+
+    The session object must be re-read from a fresh connection after a pause, so
+    callers have to use the returned db.
+    """
+    while True:
+        db.expire_all()
+        sess = db.get(ImmediateSession, session_id)
+        if sess is None or sess.status != "paused":
+            return db, sess
+        db.close()
+        await asyncio.sleep(2)
+        db = SessionLocal()
 
 
 def _get_contact_dict(uc: UploadedContact | None, phone: str) -> dict:
@@ -59,33 +143,55 @@ async def _send_one(
     node: dict,
     variant_idx: int,
     db,
-) -> bool:
+) -> tuple[bool, str | None]:
+    """Send one message. Returns (delivered, error detail)."""
     jid = phone + "@s.whatsapp.net" if "@" not in phone else phone
     try:
         result = await evolution.send_text(instance_name, jid, text)
-        wa_msg_id = (result.get("key") or {}).get("id")
-        db.add(CampaignEvent(
-            run_id=run.id,
-            campaign_id=run.campaign_id,
-            account_id=account_id,
-            node_id=node["id"],
-            kind="sent",
-            variant_index=variant_idx,
-            detail=wa_msg_id,
-        ))
+        wa_msg_id = evolution.message_id(result)
+        _record_event(db, run, node["id"], "sent", wa_msg_id, variant_idx)
         run.last_sent_at = _utcnow()
-        return True
+        return True, None
     except Exception as exc:
         logger.warning("Immediate send failed run %d: %s", run.id, exc)
-        db.add(CampaignEvent(
-            run_id=run.id,
-            campaign_id=run.campaign_id,
-            account_id=account_id,
-            node_id=node["id"],
-            kind="failed",
-            detail=str(exc)[:500],
-        ))
-        return False
+        _record_event(db, run, node["id"], "failed", str(exc), variant_idx)
+        return False, str(exc)
+
+
+async def _fail_contacts(
+    db,
+    session_id: int,
+    campaign_id: int,
+    account_id: int,
+    contact_ids: list[int],
+    node: dict,
+    node_index: int,
+    reason: str,
+) -> int:
+    """Record an explicit failure for contacts that could not be attempted."""
+    failed = 0
+    for cid in contact_ids:
+        uc = db.get(UploadedContact, cid)
+        if not uc:
+            continue
+        run = _run_for(db, campaign_id, uc, account_id)
+        if run.status == "replied":
+            continue
+        run.status = "failed"
+        run.node_id = node["id"]
+        _record_event(db, run, node["id"], "failed", reason)
+        failed += 1
+        await _broadcast_progress(session_id, campaign_id, {
+            "kind": "contact_failed",
+            "node_index": node_index,
+            "account_id": account_id,
+            "contact_id": cid,
+            "phone": uc.phone,
+            "name": uc.name or uc.phone,
+            "reason": reason,
+        })
+    db.commit()
+    return failed
 
 
 async def _sender_lane(
@@ -105,77 +211,78 @@ async def _sender_lane(
     try:
         acc = db.get(Account, account_id)
         if not acc or acc.status != "connected":
-            return {"sent": 0, "failed": len(contact_ids), "account_id": account_id}
+            failed = await _fail_contacts(
+                db, session_id, campaign_id, account_id, contact_ids, node, node_index,
+                f"Sender {account_id} is not connected" if acc else f"Sender {account_id} not found",
+            )
+            return {"sent": 0, "failed": failed, "account_id": account_id}
 
         variants = node.get("variants", [])
         if not variants:
-            return {"sent": 0, "failed": 0, "account_id": account_id}
+            failed = await _fail_contacts(
+                db, session_id, campaign_id, account_id, contact_ids, node, node_index,
+                "Message step has no text",
+            )
+            return {"sent": 0, "failed": failed, "account_id": account_id}
 
         for i, cid in enumerate(contact_ids):
-            db.expire_all()
-            sess = db.get(ImmediateSession, session_id)
-            if not sess or sess.status == "paused":
-                while sess and sess.status == "paused":
-                    db.close()
-                    await asyncio.sleep(2)
-                    db = SessionLocal()
-                    sess = db.get(ImmediateSession, session_id)
-                if not sess or sess.status not in ("running", "paused"):
-                    break
-                # Reload account from the new db session
-                acc = db.get(Account, account_id)
-                if not acc or acc.status != "connected":
-                    return {"sent": sent, "failed": failed + len(contact_ids) - i, "account_id": account_id}
-
-            if sess.status not in ("running",):
+            db, sess = await _wait_for_running(session_id, db)
+            if sess is None or sess.status != "running":
                 break
 
-            uc = db.get(UploadedContact, cid)
-            if not uc:
-                failed += 1
-                continue
-
-            run = db.query(CampaignRun).filter_by(
-                campaign_id=campaign_id, phone=uc.phone
-            ).first()
-
-            if run and run.status == "replied":
-                await _broadcast_progress(session_id, campaign_id, {
-                    "kind": "contact_skipped",
-                    "node_index": node_index,
-                    "account_id": account_id,
-                    "contact_id": cid,
-                    "phone": uc.phone,
-                    "name": uc.name or uc.phone,
-                    "reason": "replied",
-                })
-                continue
-
-            if not run:
-                run = CampaignRun(
-                    campaign_id=campaign_id,
-                    account_id=account_id,
-                    phone=uc.phone,
-                    jid=uc.phone + "@s.whatsapp.net",
-                    uploaded_contact_id=cid,
-                    status="active",
-                    node_id=node["id"],
+            # Reload account from the (possibly new) db session
+            acc = db.get(Account, account_id)
+            if not acc or acc.status != "connected":
+                failed += await _fail_contacts(
+                    db, session_id, campaign_id, account_id, contact_ids[i:], node, node_index,
+                    "Sender number disconnected during the run",
                 )
-                db.add(run)
-                db.flush()
+                break
 
-            vi = (variant_counter + i) % len(variants)
-            contact = _get_contact_dict(uc, uc.phone)
-            text = render_template(variants[vi], contact)
+            instance_name = acc.instance_name
 
-            ok = await _send_one(acc.instance_name, uc.phone, text, account_id, run, node, vi, db)
+            try:
+                uc = db.get(UploadedContact, cid)
+                if not uc:
+                    failed += 1
+                    continue
 
-            if ok:
-                sent += 1
+                run = _run_for(db, campaign_id, uc, account_id)
+
+                if run.status == "replied":
+                    _record_event(db, run, node["id"], "skipped", "replied", None)
+                    db.commit()
+                    await _broadcast_progress(session_id, campaign_id, {
+                        "kind": "contact_skipped",
+                        "node_index": node_index,
+                        "account_id": account_id,
+                        "contact_id": cid,
+                        "phone": uc.phone,
+                        "name": uc.name or uc.phone,
+                        "reason": "replied",
+                    })
+                    continue
+
+                if _already_sent(db, run, node["id"], sess.started_at):
+                    # Resumed session: never send the same step to a contact twice.
+                    continue
+
+                vi = (variant_counter + i) % len(variants)
+                contact = _get_contact_dict(uc, uc.phone)
+                text = render_template(variants[vi], contact)
+
+                ok, err = await _send_one(instance_name, uc.phone, text, account_id, run, node, vi, db)
                 run.node_id = node["id"]
-                run.status = "active"
+                if ok:
+                    sent += 1
+                    run.status = "active"
+                else:
+                    failed += 1
+                    run.status = "failed"
+                db.commit()
+
                 await _broadcast_progress(session_id, campaign_id, {
-                    "kind": "contact_sent",
+                    "kind": "contact_sent" if ok else "contact_failed",
                     "node_index": node_index,
                     "account_id": account_id,
                     "contact_id": cid,
@@ -184,25 +291,38 @@ async def _sender_lane(
                     "sent": sent,
                     "failed": failed,
                     "total": len(contact_ids),
+                    "reason": err,
                 })
-            else:
+            except Exception as exc:
+                logger.exception(
+                    "Sender lane contact error session=%d account=%d contact=%d: %s",
+                    session_id, account_id, cid, exc,
+                )
+                db.rollback()
                 failed += 1
-                run.status = "failed"
-                await _broadcast_progress(session_id, campaign_id, {
-                    "kind": "contact_failed",
-                    "node_index": node_index,
-                    "account_id": account_id,
-                    "contact_id": cid,
-                    "phone": uc.phone,
-                    "name": uc.name or uc.phone,
-                    "sent": sent,
-                    "failed": failed,
-                    "total": len(contact_ids),
-                })
+                try:
+                    uc = db.get(UploadedContact, cid)
+                    if uc:
+                        run = _run_for(db, campaign_id, uc, account_id)
+                        run.status = "failed"
+                        _record_event(db, run, node["id"], "failed", f"Unexpected error: {exc}")
+                        db.commit()
+                        await _broadcast_progress(session_id, campaign_id, {
+                            "kind": "contact_failed",
+                            "node_index": node_index,
+                            "account_id": account_id,
+                            "contact_id": cid,
+                            "phone": uc.phone,
+                            "name": uc.name or uc.phone,
+                            "sent": sent,
+                            "failed": failed,
+                            "total": len(contact_ids),
+                            "reason": str(exc),
+                        })
+                except Exception:
+                    db.rollback()
 
-            db.commit()
-
-            if i < len(contact_ids) - 1:
+            if i < len(contact_ids) - 1 and delay > 0:
                 await asyncio.sleep(delay)
 
     except Exception as exc:
@@ -230,10 +350,35 @@ async def run_immediate(session_id: int) -> None:
 
         nodes = json.loads(campaign.nodes) if campaign.nodes else []
         delay = config.get("delay", 10)
-        sender_assignments = config.get("sender_assignments", [])
-        # [{account_id, contact_ids: [int]}]
 
+        # A contact must belong to exactly one sender for the whole run, otherwise
+        # it gets messaged twice and the per-step counters disagree.
+        sender_assignments: list[dict] = []
+        claimed: set[int] = set()
+        for sa in config.get("sender_assignments", []):
+            ids = [cid for cid in sa.get("contact_ids", []) if cid not in claimed]
+            claimed.update(ids)
+            if ids:
+                sender_assignments.append({"account_id": sa["account_id"], "contact_ids": ids})
+
+        # Keep whatever an earlier attempt finished, then resume at the node that
+        # was in progress (a server restart mid-run must not restart from step 1).
         progress: dict = {"nodes": [], "replied_contacts": []}
+        if sess.progress:
+            try:
+                stored = json.loads(sess.progress)
+                if isinstance(stored, dict):
+                    progress = {
+                        "nodes": list(stored.get("nodes") or []),
+                        "replied_contacts": list(stored.get("replied_contacts") or []),
+                    }
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        resume_at = 0
+        if progress["nodes"] and sess.current_node_index is not None:
+            resume_at = max(0, min(sess.current_node_index, len(nodes) - 1))
+
         sess.status = "running"
         campaign.status = "active"
         db.commit()
@@ -241,13 +386,14 @@ async def run_immediate(session_id: int) -> None:
         await _broadcast_progress(session_id, sess.campaign_id, {
             "kind": "started",
             "total_nodes": len(nodes),
+            "resume_at": resume_at,
         })
 
         variant_counter = 0
         skip_nodes: set[int] = set()
 
         for ni, node in enumerate(nodes):
-            if ni in skip_nodes:
+            if ni in skip_nodes or ni < resume_at:
                 continue
 
             # Fresh read — previous iteration may have committed from a
@@ -392,7 +538,7 @@ async def run_immediate(session_id: int) -> None:
                                     "total": interval_seconds,
                                 })
 
-                progress["nodes"].append({
+                _set_node_result(progress, {
                     "node_index": ni,
                     "node_id": node["id"],
                     "type": "drip",
@@ -401,10 +547,12 @@ async def run_immediate(session_id: int) -> None:
                     "sent": drip_total_sent,
                     "failed": drip_total_failed,
                 })
-                progress["nodes"].append({
+                _set_node_result(progress, {
                     "node_index": next_msg_ni,
                     "node_id": next_msg_node["id"],
                     "type": "message",
+                    "sent": drip_total_sent,
+                    "failed": drip_total_failed,
                     "senders": [{"sent": drip_total_sent, "failed": drip_total_failed}],
                 })
                 db.expire_all()
@@ -469,8 +617,9 @@ async def run_immediate(session_id: int) -> None:
                     else:
                         node_stats["senders"].append(r)
 
-                progress["nodes"].append(node_stats)
-                sess.progress = json.dumps(progress)
+                _set_node_result(progress, node_stats)
+                if sess:
+                    sess.progress = json.dumps(progress)
                 db.commit()
 
                 total_sent = sum(s.get("sent", 0) for s in node_stats["senders"] if isinstance(s, dict))
@@ -568,14 +717,15 @@ async def run_immediate(session_id: int) -> None:
                         if run and run.status == "replied":
                             replied_count += 1
 
-                progress["nodes"].append({
+                _set_node_result(progress, {
                     "node_index": ni,
                     "node_id": node["id"],
                     "type": "wait",
                     "wait_seconds": wait_seconds,
                     "replied_during_wait": replied_count,
                 })
-                sess.progress = json.dumps(progress)
+                if sess:
+                    sess.progress = json.dumps(progress)
                 db.commit()
 
                 await _broadcast_progress(session_id, sess.campaign_id, {
@@ -631,10 +781,41 @@ async def run_immediate(session_id: int) -> None:
         _active_tasks.pop(session_id, None)
 
 
-def start_immediate(session_id: int) -> asyncio.Task:
-    task = asyncio.create_task(run_immediate(session_id))
-    _active_tasks[session_id] = task
-    return task
+def _launch_task(session_id: int, loop: asyncio.AbstractEventLoop) -> None:
+    if has_active_task(session_id):
+        return
+    _active_tasks[session_id] = loop.create_task(run_immediate(session_id))
+
+
+def start_immediate(session_id: int) -> None:
+    """Start the session's background task, or reuse the one already running.
+
+    Safe to call from sync endpoints (thread pool) as well as async ones.
+    """
+    if has_active_task(session_id):
+        return
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+
+    if running is not None:
+        _launch_task(session_id, running)
+    elif _main_loop is not None and _main_loop.is_running():
+        _main_loop.call_soon_threadsafe(_launch_task, session_id, _main_loop)
+    else:
+        logger.error("Cannot start immediate session %d: no event loop available", session_id)
+
+
+def _cancel_task(task: asyncio.Task) -> None:
+    """Cancel from whichever thread we are on (pause/stop endpoints are sync)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        if _main_loop is not None and _main_loop.is_running():
+            _main_loop.call_soon_threadsafe(task.cancel)
+            return
+    task.cancel()
 
 
 def pause_immediate(session_id: int) -> bool:
@@ -652,15 +833,19 @@ def pause_immediate(session_id: int) -> bool:
 
 def resume_immediate(session_id: int) -> bool:
     db = SessionLocal()
+    resumed = False
     try:
         sess = db.get(ImmediateSession, session_id)
         if sess and sess.status == "paused":
             sess.status = "running"
             db.commit()
-            return True
-        return False
+            resumed = True
     finally:
         db.close()
+    if resumed and not has_active_task(session_id):
+        # The task died earlier (e.g. the server restarted): pick the run back up.
+        start_immediate(session_id)
+    return resumed
 
 
 def stop_immediate(session_id: int) -> bool:
@@ -684,8 +869,51 @@ def stop_immediate(session_id: int) -> bool:
             db.commit()
             task = _active_tasks.pop(session_id, None)
             if task:
-                task.cancel()
+                _cancel_task(task)
             return True
         return False
     finally:
         db.close()
+
+
+async def _watchdog_tick() -> None:
+    """Keep sessions honest when nobody is driving them.
+
+    - A session stuck in "warmup" (the browser's countdown never finished) is
+      started here instead of hanging forever and blocking every new start.
+    - A session marked "running" without a live task (server restart) is marked
+      paused so the UI shows a resumable state instead of a fake "Sending…".
+    """
+    db = SessionLocal()
+    try:
+        now = _utcnow()
+        sessions = db.query(ImmediateSession).filter(
+            ImmediateSession.status.in_(("warmup", "running")),
+        ).all()
+        for sess in sessions:
+            if has_active_task(sess.id):
+                continue
+            if sess.status == "warmup":
+                started = sess.started_at or now
+                if (now - started).total_seconds() < WARMUP_GRACE:
+                    continue
+                logger.info("Watchdog starting warmup session %d (campaign %d)", sess.id, sess.campaign_id)
+                sess.status = "running"
+                db.commit()
+                start_immediate(sess.id)
+            else:
+                logger.warning("Session %d is marked running but has no task — pausing it", sess.id)
+                sess.status = "paused"
+                db.commit()
+    finally:
+        db.close()
+
+
+async def immediate_watchdog_loop() -> None:
+    logger.info("Immediate watchdog started (every %ds)", WATCHDOG_INTERVAL)
+    while True:
+        try:
+            await _watchdog_tick()
+        except Exception as exc:
+            logger.exception("Immediate watchdog error: %s", exc)
+        await asyncio.sleep(WATCHDOG_INTERVAL)

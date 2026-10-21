@@ -494,22 +494,41 @@ def immediate_start(campaign_id: int, body: ImmediateStartBody, db: Session = De
     if not nodes:
         raise HTTPException(400, "Campaign has no nodes")
 
+    # A contact may only ride with one sender: a duplicate assignment would send
+    # it twice and make the per-step sent/failed counters disagree.
+    claimed: set[int] = set()
+    assignments: list[dict] = []
     for sa in body.sender_assignments:
         acc = db.get(Account, sa.account_id)
         if not acc:
             raise HTTPException(400, f"Account {sa.account_id} not found")
-        if not sa.contact_ids:
-            raise HTTPException(400, f"No contacts assigned to account {sa.account_id}")
+        ids = [cid for cid in dict.fromkeys(sa.contact_ids) if cid not in claimed]
+        claimed.update(ids)
+        if ids:
+            assignments.append({"account_id": sa.account_id, "contact_ids": ids})
+
+    if not assignments:
+        raise HTTPException(400, "No contacts assigned to any sender number")
 
     existing = db.query(ImmediateSession).filter(
         ImmediateSession.campaign_id == campaign_id,
         ImmediateSession.status.in_(("warmup", "running", "paused")),
-    ).first()
+    ).order_by(ImmediateSession.id.desc()).first()
     if existing:
-        raise HTTPException(409, "An immediate session is already active for this campaign")
+        from app.immediate_engine import has_active_task
+
+        if existing.status == "warmup" and not has_active_task(existing.id):
+            # Abandoned warmup: the browser's 30s countdown never finished, so the
+            # session would sit there forever and block every new start.
+            logger.info("Replacing abandoned warmup session %d (campaign %d)", existing.id, campaign_id)
+            existing.status = "failed"
+            existing.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.commit()
+        else:
+            raise HTTPException(409, "An immediate session is already active for this campaign")
 
     config = {
-        "sender_assignments": [sa.model_dump() for sa in body.sender_assignments],
+        "sender_assignments": assignments,
         "delay": body.delay,
     }
 
@@ -531,18 +550,21 @@ def immediate_start(campaign_id: int, body: ImmediateStartBody, db: Session = De
 
 @router.post("/{campaign_id}/immediate-launch/{session_id}")
 async def immediate_launch(campaign_id: int, session_id: int, db: Session = Depends(get_db)):
-    from app.immediate_engine import start_immediate
+    from app.immediate_engine import has_active_task, start_immediate
 
     sess = db.get(ImmediateSession, session_id)
     if not sess or sess.campaign_id != campaign_id:
         raise HTTPException(404, "Session not found")
-    if sess.status != "warmup":
-        raise HTTPException(409, f"Session is {sess.status}, expected warmup")
+    if sess.status not in ("warmup", "running"):
+        raise HTTPException(409, f"Session is {sess.status}")
 
-    sess.status = "running"
-    db.commit()
+    if sess.status == "warmup":
+        sess.status = "running"
+        db.commit()
 
-    start_immediate(session_id)
+    # Idempotent: the watchdog may already have started this session.
+    if not has_active_task(session_id):
+        start_immediate(session_id)
 
     return {"session_id": session_id, "status": "running"}
 
@@ -603,28 +625,123 @@ def immediate_progress(campaign_id: int, session_id: int, db: Session = Depends(
     if not sess or sess.campaign_id != campaign_id:
         raise HTTPException(404, "Session not found")
 
-    progress = json.loads(sess.progress) if sess.progress else None
+    campaign = db.get(Campaign, campaign_id)
+    nodes = _parse_nodes(campaign.nodes) if campaign else []
+    index_by_node_id: dict[str, int] = {
+        node["id"]: i for i, node in enumerate(nodes) if node.get("id")
+    }
 
-    # Get per-contact status for the report
     config = json.loads(sess.config)
-    all_contact_ids = []
+    all_contact_ids: list[int] = []
     for sa in config.get("sender_assignments", []):
         all_contact_ids.extend(sa.get("contact_ids", []))
 
+    contacts_by_id = {
+        uc.id: uc
+        for uc in db.query(UploadedContact).filter(UploadedContact.id.in_(all_contact_ids)).all()
+    } if all_contact_ids else {}
+
+    runs = db.query(CampaignRun).filter(CampaignRun.campaign_id == campaign_id).all()
+    run_by_id = {r.id: r for r in runs}
+    run_by_contact: dict[int, CampaignRun] = {}
+    run_by_phone: dict[str, CampaignRun] = {}
+    for r in runs:
+        if r.uploaded_contact_id:
+            run_by_contact.setdefault(r.uploaded_contact_id, r)
+        run_by_phone.setdefault(r.phone, r)
+
+    # Only the runs belonging to the contacts of this session may contribute.
+    session_run_ids: set[int] = set()
+    for cid in all_contact_ids:
+        uc = contacts_by_id.get(cid)
+        run = run_by_contact.get(cid) or (run_by_phone.get(uc.phone) if uc else None)
+        if run:
+            session_run_ids.add(run.id)
+
+    # Delivery state comes from the event log only. run.status is workflow state
+    # ("active" just means enrolled), so it must never be reported as "sent".
+    events = db.query(CampaignEvent).filter(
+        CampaignEvent.campaign_id == campaign_id,
+        CampaignEvent.kind.in_(("sent", "failed", "skipped")),
+        CampaignEvent.run_id.in_(session_run_ids),
+    ).order_by(CampaignEvent.at.asc(), CampaignEvent.id.asc()).all() if session_run_ids else []
+
+    node_stats: dict[str, dict[str, int]] = {
+        node_id: {"sent": 0, "failed": 0} for node_id in index_by_node_id
+    }
+    history: dict[int, list[dict]] = {}
+    for ev in events:
+        run = run_by_id.get(ev.run_id)
+        if not run or not ev.node_id or ev.node_id not in index_by_node_id:
+            continue
+        ni = index_by_node_id[ev.node_id]
+        if ev.kind == "sent":
+            node_stats[ev.node_id]["sent"] += 1
+        elif ev.kind == "failed":
+            node_stats[ev.node_id]["failed"] += 1
+        if run.uploaded_contact_id:
+            hist = history.setdefault(run.uploaded_contact_id, [])
+            current = next((h for h in hist if h["node_index"] == ni), None)
+            if current is None:
+                hist.append({"node_index": ni, "status": ev.kind})
+            else:
+                current["status"] = ev.kind
+
+    def _stats(node_id: str | None) -> dict[str, int]:
+        return node_stats.get(node_id or "", {"sent": 0, "failed": 0})
+
+    # Session progress still holds drip/wait metadata; the sent/failed numbers
+    # are recalculated from the event log so they can never drift.
+    stored: dict[int, dict] = {}
+    if sess.progress:
+        try:
+            payload = json.loads(sess.progress)
+            if isinstance(payload, dict):
+                for entry in payload.get("nodes") or []:
+                    if isinstance(entry, dict) and entry.get("node_index") is not None:
+                        stored[entry["node_index"]] = entry
+        except (json.JSONDecodeError, TypeError):
+            stored = {}
+
+    progress_nodes = []
+    for ni, node in enumerate(nodes):
+        entry = dict(stored.get(ni) or {})
+        entry["node_index"] = ni
+        entry["node_id"] = node.get("id")
+        entry["type"] = node.get("type")
+        stats = _stats(node.get("id"))
+        entry["sent"] = stats["sent"]
+        entry["failed"] = stats["failed"]
+        entry["senders"] = [dict(stats)]
+        progress_nodes.append(entry)
+
+    progress = {"nodes": progress_nodes, "replied_contacts": []}
+
     contact_statuses = []
     for cid in all_contact_ids:
-        uc = db.get(UploadedContact, cid)
+        uc = contacts_by_id.get(cid)
         if not uc:
             continue
-        run = db.query(CampaignRun).filter_by(
-            campaign_id=campaign_id, phone=uc.phone
-        ).first()
+        hist = history.get(cid, [])
+        latest = hist[-1] if hist else None
+        run = run_by_contact.get(cid) or run_by_phone.get(uc.phone)
+        if latest:
+            status = latest["status"]
+            node_index = latest["node_index"]
+        elif run and run.status == "replied":
+            status = "skipped"
+            node_index = sess.current_node_index
+        else:
+            status = "pending"
+            node_index = sess.current_node_index
         contact_statuses.append({
             "contact_id": cid,
             "phone": uc.phone,
             "name": uc.name or uc.phone,
-            "status": run.status if run else "pending",
-            "node_id": run.node_id if run else None,
+            "status": status,
+            "node_index": node_index,
+            "node_id": nodes[node_index].get("id") if 0 <= node_index < len(nodes) else None,
+            "history": hist,
         })
 
     return {

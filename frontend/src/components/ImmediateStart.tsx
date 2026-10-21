@@ -37,9 +37,10 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
 
   const connectedAccounts = accounts.filter((a) => a.status === "connected");
 
-  // Recovery: if we have a recovered session, initialize the store and start polling
+  // Recovery: re-attach to a session that already exists on the server.
   useEffect(() => {
-    if (recoveredSessionId && !immediateSession) {
+    if (!recoveredSessionId) return;
+    if (!useStore.getState().immediateSession) {
       useStore.getState().setImmediateSession({
         sessionId: recoveredSessionId,
         campaignId: campaign.id,
@@ -48,8 +49,15 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
         nodeResults: [],
         contactEvents: [],
       });
-      pollProgress(recoveredSessionId);
-      startPolling(recoveredSessionId);
+    }
+    pollProgress(recoveredSessionId);
+    startPolling(recoveredSessionId);
+
+    // A session still in "warmup" means the countdown never completed (tab
+    // closed, page reloaded, server restarted). Start it now instead of
+    // showing a frozen "Sending..." window that never sends anything.
+    if (recoveredStatus === "warmup") {
+      launchCampaign(recoveredSessionId);
     }
   }, [recoveredSessionId]);
 
@@ -65,27 +73,35 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
       const sess = useStore.getState().immediateSession;
       if (!sess) return;
 
-      // Build contact events from server response
-      const contactEvents = resp.contacts
-        .filter((c) => c.status !== "pending")
-        .map((c) => ({
-          contactId: c.contact_id,
-          phone: c.phone,
-          name: c.name,
-          status: (c.status === "active" || c.status === "completed" ? "sent" :
-                  c.status === "failed" ? "failed" :
-                  c.status === "replied" ? "skipped" : "sent") as "sent" | "failed" | "skipped" | "pending",
-          nodeIndex: resp.current_node_index,
-          accountId: 0,
-        }));
+      // Merge delivery events from the server. Server entries win: they come
+      // from the campaign event log, local ones may still be in flight.
+      type Evt = (typeof sess.contactEvents)[number];
+      const merged = new Map<string, Evt>();
+      for (const e of sess.contactEvents) merged.set(`${e.contactId}:${e.nodeIndex}`, e);
+      for (const c of resp.contacts ?? []) {
+        const history = c.history && c.history.length > 0
+          ? c.history
+          : [{ node_index: c.node_index ?? resp.current_node_index ?? 0, status: c.status }];
+        for (const h of history) {
+          if (h.status !== "sent" && h.status !== "failed" && h.status !== "skipped") continue;
+          merged.set(`${c.contact_id}:${h.node_index}`, {
+            contactId: c.contact_id,
+            phone: c.phone,
+            name: c.name,
+            status: h.status,
+            nodeIndex: h.node_index,
+            accountId: 0,
+          });
+        }
+      }
 
-      // Build node results from server progress
+      // Node results: sent/failed are recalculated server-side from the event log
       const nodeResults = resp.progress?.nodes.map((n: any) => ({
         nodeIndex: n.node_index,
         nodeId: n.node_id,
         type: n.type,
-        sent: n.type === "drip" ? (n.sent ?? 0) : n.senders?.reduce((s: number, x: any) => s + (x.sent || 0), 0),
-        failed: n.type === "drip" ? (n.failed ?? 0) : n.senders?.reduce((s: number, x: any) => s + (x.failed || 0), 0),
+        sent: n.sent ?? n.senders?.reduce((s: number, x: any) => s + (x.sent || 0), 0) ?? 0,
+        failed: n.failed ?? n.senders?.reduce((s: number, x: any) => s + (x.failed || 0), 0) ?? 0,
         batchesCompleted: n.batches_completed,
         totalBatches: n.total_batches,
         repliedDuringWait: n.replied_during_wait,
@@ -97,7 +113,7 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
         status: resp.status,
         currentNodeIndex: resp.current_node_index,
         nodeResults: nodeResults.length > 0 ? nodeResults : sess.nodeResults,
-        contactEvents: contactEvents.length > 0 ? contactEvents : sess.contactEvents,
+        contactEvents: merged.size > 0 ? Array.from(merged.values()) : sess.contactEvents,
       });
 
       if (resp.status === "completed" || resp.status === "failed") {
@@ -212,12 +228,21 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
     try {
       await api.immediateLaunch(campaign.id, sid);
       setPhase("running");
-      useStore.getState().setImmediateSession({
-        ...useStore.getState().immediateSession!,
-        status: "running",
-      });
+      const sess = useStore.getState().immediateSession;
+      if (sess) useStore.getState().setImmediateSession({ ...sess, status: "running" });
       startPolling(sid);
     } catch (e) {
+      // 409 means the session is not in warmup anymore (e.g. the server-side
+      // watchdog started it while the tab was closed). Ask the server what it is.
+      if (e instanceof api.ApiError && e.status === 409) {
+        await pollProgress(sid);
+        const status = useStore.getState().immediateSession?.status;
+        if (status === "running" || status === "paused") {
+          setPhase("running");
+          startPolling(sid);
+        }
+        return;
+      }
       setError(e instanceof api.ApiError ? e.detail : "Launch failed");
       setPhase("config");
     }

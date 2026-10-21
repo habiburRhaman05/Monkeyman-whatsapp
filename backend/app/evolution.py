@@ -133,6 +133,23 @@ async def fetch_owner_jid(instance_name: str) -> str | None:
 
 # ── Messages ─────────────────────────────────────────────
 
+def message_id(data: Any) -> str | None:
+    """Extract the WhatsApp message id from an Evolution response payload.
+
+    A 2xx reply without `key.id` means WhatsApp never accepted the message, even
+    though the HTTP call looked successful.
+    """
+    item = data[0] if isinstance(data, list) and data else data
+    if not isinstance(item, dict):
+        return None
+    key = item.get("key")
+    if isinstance(key, dict) and key.get("id"):
+        return str(key["id"])
+    if item.get("id"):
+        return str(item["id"])
+    return None
+
+
 async def send_text(
     instance_name: str, to: str, text: str, quoted_msg: dict | None = None, mentioned: list[str] | None = None
 ) -> dict[str, Any]:
@@ -145,7 +162,12 @@ async def send_text(
         body["quoted"] = quoted_msg
     if mentioned:
         body["mentioned"] = mentioned
-    return await _request("POST", f"/message/sendText/{instance_name}", json=body)
+    data = await _request("POST", f"/message/sendText/{instance_name}", json=body)
+    if not message_id(data):
+        # Evolution sometimes answers 200/201 with an error payload or an empty
+        # body. Treat that as a failed send instead of a delivered message.
+        raise EvolutionError(0, f"Message not accepted: {str(data)[:300]}")
+    return data
 
 
 async def send_audio(instance_name: str, to: str, audio_b64: str) -> dict[str, Any]:
