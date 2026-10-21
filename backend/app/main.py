@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import evolution, immediate_engine
+from app import account_status, evolution, immediate_engine
 from app.auth import require_auth, require_ws_auth
 from app.config import settings
 from app.db import Base, SessionLocal, engine, run_migrations
@@ -73,11 +73,13 @@ async def lifespan(_: FastAPI):
     campaign_task = asyncio.create_task(campaign_loop())
     tag_watch_task = asyncio.create_task(tag_watch_loop())
     immediate_task = asyncio.create_task(immediate_engine.immediate_watchdog_loop())
+    status_task = asyncio.create_task(account_status.account_status_loop())
     yield
     webhook_task.cancel()
     campaign_task.cancel()
     tag_watch_task.cancel()
     immediate_task.cancel()
+    status_task.cancel()
 
 
 app = FastAPI(title="WhatsApp Dashboard", version="0.1.0", lifespan=lifespan)

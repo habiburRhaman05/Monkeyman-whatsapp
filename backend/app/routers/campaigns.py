@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app import campaign_settings
+from app import account_status, campaign_settings
 from app.db import get_db
 from app.models import Account, Campaign, CampaignEvent, CampaignNodeState, CampaignRun, ImmediateSession, Label, UploadedContact
 
@@ -384,7 +384,7 @@ class EnrollBody(BaseModel):
     contact_ids: list[int] | None = None
 
 @router.post("/{campaign_id}/enroll")
-def enroll_contacts(campaign_id: int, body: EnrollBody, db: Session = Depends(get_db)):
+async def enroll_contacts(campaign_id: int, body: EnrollBody, db: Session = Depends(get_db)):
     """Enroll contacts into a campaign. Creates CampaignRun entries for each contact."""
     from app.models import UploadedContact, ContactSender
 
@@ -396,9 +396,20 @@ def enroll_contacts(campaign_id: int, body: EnrollBody, db: Session = Depends(ge
     if not sender_ids:
         raise HTTPException(400, "Campaign has no sender numbers assigned")
 
-    senders = db.query(Account).filter(Account.id.in_(sender_ids), Account.status == "connected").all()
+    # Ask Evolution which of the chosen numbers are connected right now — the
+    # status in the database can be stale if no CONNECTION_UPDATE arrived.
+    all_senders = db.query(Account).filter(Account.id.in_(sender_ids)).all()
+    for sender in all_senders:
+        await account_status.refresh_status(db, sender)
+    db.commit()
+
+    senders = [s for s in all_senders if s.status == "connected"]
     if not senders:
-        raise HTTPException(400, "No connected sender accounts")
+        names = ", ".join(s.label for s in all_senders) or "the selected numbers"
+        raise HTTPException(
+            400,
+            f"No connected sender accounts. Not connected: {names}. Connect the number in Numbers, then try again.",
+        )
 
     # Gather contacts
     query = db.query(UploadedContact)
@@ -413,17 +424,17 @@ def enroll_contacts(campaign_id: int, body: EnrollBody, db: Session = Depends(ge
     if not contacts:
         raise HTTPException(400, "No contacts to enroll")
 
-    # Check existing enrollments to avoid duplicates
-    existing = set(
-        r.phone for r in db.query(CampaignRun.phone).filter(
-            CampaignRun.campaign_id == c.id,
-            CampaignRun.status.in_(("active", "waiting", "queued")),
-        ).all()
-    )
+    # Any run for this campaign blocks a second one — campaign_runs has a unique
+    # (campaign_id, phone) constraint, so re-enrolling a contact that already
+    # finished would otherwise crash with a 500.
+    existing = {
+        r.phone for r in db.query(CampaignRun.phone).filter(CampaignRun.campaign_id == c.id).all()
+    }
 
     enrolled = 0
     skipped = 0
     sender_idx = 0
+    connected_ids = {s.id for s in senders}
 
     for uc in contacts:
         if uc.phone in existing:
@@ -432,7 +443,7 @@ def enroll_contacts(campaign_id: int, body: EnrollBody, db: Session = Depends(ge
 
         # Sticky sender assignment: check if this phone already has an assigned sender
         sticky = db.query(ContactSender).filter_by(phone=uc.phone).first()
-        if sticky and sticky.account_id in sender_ids:
+        if sticky and sticky.account_id in connected_ids:
             account_id = sticky.account_id
         else:
             account_id = senders[sender_idx % len(senders)].id
@@ -485,7 +496,7 @@ class ImmediateStartBody(BaseModel):
 
 
 @router.post("/{campaign_id}/immediate-start")
-def immediate_start(campaign_id: int, body: ImmediateStartBody, db: Session = Depends(get_db)):
+async def immediate_start(campaign_id: int, body: ImmediateStartBody, db: Session = Depends(get_db)):
     c = db.get(Campaign, campaign_id)
     if not c:
         raise HTTPException(404, "Campaign not found")
@@ -504,8 +515,18 @@ def immediate_start(campaign_id: int, body: ImmediateStartBody, db: Session = De
             raise HTTPException(400, f"Account {sa.account_id} not found")
         ids = [cid for cid in dict.fromkeys(sa.contact_ids) if cid not in claimed]
         claimed.update(ids)
-        if ids:
-            assignments.append({"account_id": sa.account_id, "contact_ids": ids})
+        if not ids:
+            continue
+        # Live check: a stale "connected" in the database would try to send from
+        # a number that is not linked and mark every contact as failed.
+        status = await account_status.refresh_status(db, acc)
+        if status != "connected":
+            db.commit()
+            raise HTTPException(
+                400,
+                f"'{acc.label}' is not connected. Connect the number in Numbers, or uncheck it.",
+            )
+        assignments.append({"account_id": sa.account_id, "contact_ids": ids})
 
     if not assignments:
         raise HTTPException(400, "No contacts assigned to any sender number")

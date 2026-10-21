@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import * as api from "@/lib/api";
+import { refreshAccounts } from "@/lib/actions";
 
 interface Props {
   campaign: api.Campaign;
@@ -125,6 +126,8 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
 
   useEffect(() => {
     api.listBatches().then(setBatches).catch(() => {});
+    // Sender numbers must be connected; their status can change between visits.
+    refreshAccounts();
     return () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
       if (pollRef.current) clearInterval(pollRef.current);
@@ -371,6 +374,11 @@ export default function ImmediateStart({ campaign, onClose, recoveredSessionId, 
                 <label className="text-sm font-medium">Sender Numbers</label>
                 <button onClick={addSender} className="text-xs text-primary hover:underline">+ Add sender</button>
               </div>
+              {connectedAccounts.length === 0 && (
+                <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-2">
+                  No connected numbers. Connect a number in the Numbers page, then reopen this dialog.
+                </p>
+              )}
               <div className="space-y-3">
                 {assignments.map((a, i) => (
                   <div key={i} className="flex items-center gap-2 bg-gray-50 p-3 rounded-lg">

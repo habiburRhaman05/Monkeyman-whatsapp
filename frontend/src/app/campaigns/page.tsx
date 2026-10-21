@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import * as api from "@/lib/api";
+import { refreshAccounts } from "@/lib/actions";
 import VariablePills from "@/components/VariablePills";
 import ImmediateStart from "@/components/ImmediateStart";
 import LogoutButton from "@/components/LogoutButton";
@@ -208,6 +209,14 @@ export default function CampaignsPage() {
     const iv = setInterval(() => {
       api.listCampaigns().then((c) => useStore.getState().setCampaigns(c)).catch(() => {});
     }, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Sender badges show "connected / not connected", so keep the live Evolution
+  // status fresh while this page is open instead of trusting a stale store.
+  useEffect(() => {
+    refreshAccounts();
+    const iv = setInterval(refreshAccounts, 10000);
     return () => clearInterval(iv);
   }, []);
 

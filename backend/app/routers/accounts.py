@@ -7,7 +7,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app import evolution
+from app import account_status, evolution
 from app.config import settings
 from app.db import get_db
 from app.models import Account
@@ -33,23 +33,9 @@ def webhook_url() -> str:
 
 @router.get("")
 async def list_accounts(db: Session = Depends(get_db)):
-    accounts = db.query(Account).order_by(Account.created_at).all()
-
-    # Refresh status from Evolution for every account
-    for acc in accounts:
-        try:
-            state = await evolution.connection_state(acc.instance_name)
-            new_status = "connected" if state == "open" else "disconnected" if state == "close" else "connecting"
-            if acc.status != new_status:
-                acc.status = new_status
-        except evolution.EvolutionError as exc:
-            # Only a 404 means the instance is really gone; other errors keep the last known status
-            if exc.status_code == 404 and acc.status != "disconnected":
-                acc.status = "disconnected"
-        except httpx.HTTPError:
-            pass  # Evolution unreachable: keep last known status
-    db.commit()
-
+    # Refresh status from Evolution for every account, so "connected" is never
+    # a stale value read from the database.
+    accounts = await account_status.refresh_all(db)
     return [account_out(db, a) for a in accounts]
 
 
