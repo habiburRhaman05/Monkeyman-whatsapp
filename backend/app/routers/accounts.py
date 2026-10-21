@@ -33,9 +33,10 @@ def webhook_url() -> str:
 
 @router.get("")
 async def list_accounts(db: Session = Depends(get_db)):
-    # Refresh status from Evolution for every account, so "connected" is never
-    # a stale value read from the database.
-    accounts = await account_status.refresh_all(db)
+    # Read from database — the background account_status_loop keeps it fresh.
+    # Hitting Evolution API on every request causes too many calls and
+    # destabilises the WhatsApp connection.
+    accounts = db.query(Account).order_by(Account.created_at).all()
     return [account_out(db, a) for a in accounts]
 
 

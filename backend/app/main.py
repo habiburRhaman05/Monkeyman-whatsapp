@@ -50,6 +50,8 @@ async def _reapply_webhooks_and_sync() -> None:
         except Exception as exc:
             logger.warning("Could not re-apply webhook for account %s: %s — %s", account_id, type(exc).__name__, exc)
             continue
+        # Space out API calls to avoid hammering Evolution on startup
+        await asyncio.sleep(2)
         db = SessionLocal()
         try:
             acc = db.get(Account, account_id)
@@ -58,6 +60,8 @@ async def _reapply_webhooks_and_sync() -> None:
             db.close()
         if connected:
             await sync_account(account_id)
+            # Wait between syncs so Evolution isn't flooded
+            await asyncio.sleep(5)
 
 
 @asynccontextmanager

@@ -19,7 +19,7 @@ from app.ws import manager
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL = 20  # seconds between status sweeps
+POLL_INTERVAL = 60  # seconds between status sweeps (keep low to avoid hammering Evolution/WhatsApp)
 
 
 def state_to_status(state: str) -> str:

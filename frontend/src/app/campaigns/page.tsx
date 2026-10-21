@@ -216,7 +216,7 @@ export default function CampaignsPage() {
   // status fresh while this page is open instead of trusting a stale store.
   useEffect(() => {
     refreshAccounts();
-    const iv = setInterval(refreshAccounts, 10000);
+    const iv = setInterval(refreshAccounts, 30000);
     return () => clearInterval(iv);
   }, []);
 
